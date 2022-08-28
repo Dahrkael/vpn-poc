@@ -1,13 +1,12 @@
-#include <string.h>
-
 #include <fcntl.h>
 #include <unistd.h>
+
+#include <sys/socket.h>
+#include <sys/ioctl.h>
 
 #include <net/if.h>
 #include <linux/if.h>
 #include <linux/if_tun.h>
-
-#include <sys/ioctl.h>
 
 #include "common.h"
 
@@ -15,6 +14,8 @@
 // mknod /dev/net/tun c 10 200
 // chmod 0666 /dev/net/tun
 // modprobe tun
+
+// TODO TUNSETSNDBUF 
 
 typedef struct
 {
@@ -30,12 +31,12 @@ bool check_tun_privileges()
    return ok;
 }
 
-int allocate_tun_device(char* device_name)
+int32_t allocate_tun_device(char* device_name)
 {
    if (!device_name)
       return -1;
 
-   int tun_fd = open("/dev/net/tun", O_RDWR);
+   int32_t tun_fd = open("/dev/net/tun", O_RDWR);
    if (tun_fd < 0)
       return -1;
 
@@ -49,11 +50,10 @@ int allocate_tun_device(char* device_name)
    if( *device_name )
       strncpy(request.ifr_name, device_name, IF_NAMESIZE);
 
-   int ret = ioctl(tun_fd, TUNSETIFF, (void*)&request);
-   if ( ret < 0 )
+   if ( ioctl(tun_fd, TUNSETIFF, (void*)&request) < 0 )
    {
       close(tun_fd);
-      return ret;
+      return -1;
    }
 
    // copy back the assigned name
@@ -61,30 +61,130 @@ int allocate_tun_device(char* device_name)
    return tun_fd;
 }
 
-void configure_tunnel(const Tunnel* tunnel)
+bool tunnel_get_flags(Tunnel* tunnel, uint16_t* flags)
 {
+   if (tunnel->fd == -1)
+      return false;
+
    struct ifreq request;
-   memset(&request, 0, sizeof(request));
-   strncpy(request.ifr_name, tunnel->if_name, IF_NAMESIZE);
+   CLEAR(request);
+   int ret = ioctl(tunnel->fd, SIOCGIFFLAGS, (void*)&request);
+   if ( ret == -1)
+      return false;
 
-   request.ifr_addr;
-   ioctl(tunnel->fd, SIOCSIFADDR, (void*)&request);
+   *flags = request.ifr_flags;
+   return true;
+}
 
-   request.ifr_dstaddr;
-   ioctl(tunnel->fd, SIOCSIFDSTADDR, (void*)&request);
+bool tunnel_set_flags(Tunnel* tunnel, const uint16_t flags, const bool keep_current)
+{
+   if (tunnel->fd == -1)
+      return false;
 
-   request.ifr_netmask;
-   ioctl(tunnel->fd, SIOCSIFNETMASK, (void*)&request);
+   struct ifreq request;
+   CLEAR(request);
 
-   request.ifr_mtu;
-   ioctl(tunnel->fd, SIOCSIFMTU, (void*)&request);
+   if (keep_current && !tunnel_get_flags(tunnel, &request.ifr_flags))
+      return false;
 
-   ioctl(tunnel->fd, SIOCGIFFLAGS, (void*)&request);
-   request.ifr_flags;
-   ioctl(tunnel->fd, SIOCSIFFLAGS, (void*)&request);
+   // OR new flags to keep the old ones if set
+   request.ifr_flags |= flags;
+   int ret = ioctl(tunnel->fd, SIOCSIFFLAGS, (void*)&request);
+   if ( ret == -1)
+      return false;
 
-   //request.ifr_addr;
-   //int ret = ioctl(tunnel->fd, TUNSETPERSIST, (void*)&request);
+   return true;
+}
 
-   IFF_UP;
+bool tunnel_set_name(Tunnel* tunnel, const char* name)
+{
+   if (tunnel->fd == -1)
+      return false;
+
+   struct ifreq request;
+   CLEAR(request);
+   strncpy(request.ifr_name, name, IF_NAMESIZE);
+
+   if (!tunnel_get_flags(tunnel, &request.ifr_flags))
+      return false;
+
+   return ioctl(tunnel->fd, TUNSETIFF, (void*)&request) == 0;
+}
+
+bool tunnel_set_local_address(Tunnel* tunnel, const struct sockaddr* address)
+{
+   if (tunnel->fd == -1)
+      return false;
+
+   struct ifreq request;
+   CLEAR(request);
+   memcpy(&request.ifr_addr, &address, sizeof(request.ifr_addr));
+
+   return ioctl(tunnel->fd, SIOCSIFADDR, (void*)&request) == 0;
+}
+
+bool tunnel_set_remote_address(Tunnel* tunnel, const struct sockaddr* address)
+{
+   if (tunnel->fd == -1)
+      return false;
+
+   struct ifreq request;
+   CLEAR(request);
+   memcpy(&request.ifr_addr, &address, sizeof(request.ifr_addr));
+
+   return ioctl(tunnel->fd, SIOCSIFDSTADDR, (void*)&request) == 0;
+}
+
+bool tunnel_set_network_mask(Tunnel* tunnel, const struct sockaddr* mask)
+{
+   if (tunnel->fd == -1)
+      return false;
+
+   struct ifreq request;
+   CLEAR(request);
+   memcpy(&request.ifr_addr, &mask, sizeof(request.ifr_addr));
+
+   return ioctl(tunnel->fd, SIOCSIFNETMASK, (void*)&request) == 0;
+}
+
+bool tunnel_set_mtu(Tunnel* tunnel, const uint32_t mtu)
+{
+   if (tunnel->fd == -1)
+      return false;
+
+   struct ifreq request;
+   CLEAR(request);
+   request.ifr_mtu = mtu;
+
+   return ioctl(tunnel->fd, SIOCSIFMTU, (void*)&request) == 0;
+}
+
+bool tunnel_persist(Tunnel* tunnel, const bool on)
+{
+   if (tunnel->fd == -1)
+      return false;
+
+   if (on)
+   {
+      // try set owner and group so it can be used without root privileges
+      ioctl(tunnel->fd, TUNSETOWNER, geteuid());
+      //ioctl(tunnel->fd, TUNSETGROUP, group);
+   }
+
+   return ioctl(tunnel->fd, TUNSETPERSIST, on) == 0;
+}
+
+bool tunnel_up(Tunnel* tunnel)
+{
+   return tunnel_set_flags(tunnel, IFF_UP | IFF_RUNNING, true);
+}
+
+bool tunnel_down(Tunnel* tunnel)
+{
+   uint16_t flags = 0;
+   if (!tunnel_get_flags(tunnel, &flags))
+      return false;
+
+   flags &= ~(IFF_UP | IFF_RUNNING);
+   return tunnel_set_flags(tunnel, flags, false);
 }
