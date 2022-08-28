@@ -1,9 +1,3 @@
-#include <bits/getopt_core.h>
-#include <stdio.h>
-#include <assert.h>
-#include <string.h>
-#include <stdint.h>
-
 #include <unistd.h>
 #include <getopt.h>
 
@@ -177,15 +171,16 @@ int main(int argc, char** argv)
       return 0;
    }
    
-   char name[IFNAMSIZ] = {};
-   int tunnel = allocate_tun_device(name);
-   if (tunnel < 0)
+   Tunnel tunnel;
+   CLEAR(tunnel);
+
+   if (!tunnel_open(&tunnel, startup_options.interface))
    {
-      printf("it failed!\n");
+      printf("failed to open a tunnel\n");
       return 0;
    }
-   else
-      printf("it works! name: %s\n", name);
+
+   printf("tunnel open on interface %s\n", tunnel.if_name);
 
    while(1)
    {
