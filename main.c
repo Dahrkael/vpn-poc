@@ -205,22 +205,55 @@ int main(int argc, char** argv)
    }
 
    printf("tunnel open on interface %s\n", tunnel.if_name);
-   if (!tunnel_set_addresses(&tunnel, &startup_options.tunnel_address))
+
+   // set specified local and remote addresses or defaults
+   struct sockaddr_storage address;
+   if (startup_options.tunnel_address.ss_family == AF_UNSPEC)
+   {
+      const char* default_tunnel_address = "10.9.8.0";
+      address.ss_family = AF_INET;
+      ((struct sockaddr_in*)&address)->sin_addr.s_addr = inet_addr(default_tunnel_address);
+   }
+   else
+   {
+      memcpy(&address, &startup_options.tunnel_address, sizeof(address));
+   }
+
+   if (!tunnel_set_addresses(&tunnel, &address))
    {
       printf("failed to set tunnel addresses\n");
       return 0;
    }
-   if (!tunnel_set_network_mask(&tunnel, &startup_options.tunnel_netmask))
+
+   // set specified network mask or default
+   struct sockaddr_storage netmask;
+   if (startup_options.tunnel_netmask.ss_family == AF_UNSPEC)
+   {
+      const char* default_tunnel_netmask = "255.255.255.0";
+      netmask.ss_family = AF_INET;
+      ((struct sockaddr_in*)&netmask)->sin_addr.s_addr = inet_addr(default_tunnel_netmask);
+   }
+   else
+   {
+      memcpy(&netmask, &startup_options.tunnel_netmask, sizeof(netmask));
+   }
+
+   if (!tunnel_set_network_mask(&tunnel, &netmask))
    {
       printf("failed to set tunnel network mask\n");
       return 0;
    }
+
+   // activate the tunnel
    tunnel_up(&tunnel);
 
    while(1)
    {
       sleep(1);
    }
+
+   tunnel_down(&tunnel);
+   tunnel_close(&tunnel);
 
    return 0;
 }

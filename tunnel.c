@@ -93,6 +93,15 @@ bool tunnel_open(Tunnel* tunnel, const char* name)
    return true;
 }
 
+bool tunnel_close(Tunnel* tunnel)
+{
+   close(tunnel->fd);
+   tunnel->fd = -1;
+   close(tunnel->socket);
+   tunnel->socket = -1;
+   memset(tunnel->if_name, 0, IF_NAMESIZE);
+}
+
 bool tunnel_get_flags(Tunnel* tunnel, const bool from_socket, uint16_t* flags)
 {
    if (tunnel->fd == -1)
@@ -196,10 +205,10 @@ bool tunnel_set_addresses(Tunnel* tunnel, const struct sockaddr_storage* address
       return false;
    }
 
-   // copy the block and modify the last octet to get two different ips
    struct sockaddr_storage address;
    memcpy(&address, address_block, sizeof(address));
 
+   // modify the last octet to get two different ips
    struct sockaddr_in* ipv4 = (struct sockaddr_in*)&address;
    uint8_t* last_octet = ((uint8_t*)&ipv4->sin_addr.s_addr)+3;
 
@@ -236,7 +245,7 @@ bool tunnel_set_network_mask(Tunnel* tunnel, const struct sockaddr_storage* mask
    struct ifreq request;
    CLEAR(request);
    memcpy(&request.ifr_name, tunnel->if_name, IF_NAMESIZE);
-   memcpy(&request.ifr_addr, mask, sizeof(mask));
+   memcpy(&request.ifr_netmask, mask, sizeof(request.ifr_netmask));
 
    return ioctl(tunnel->socket, SIOCSIFNETMASK, (void*)&request) == 0;
 }
