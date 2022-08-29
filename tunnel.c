@@ -93,7 +93,7 @@ bool tunnel_open(Tunnel* tunnel, const char* name)
    return true;
 }
 
-bool tunnel_close(Tunnel* tunnel)
+void tunnel_close(Tunnel* tunnel)
 {
    close(tunnel->fd);
    tunnel->fd = -1;
@@ -102,7 +102,7 @@ bool tunnel_close(Tunnel* tunnel)
    memset(tunnel->if_name, 0, IF_NAMESIZE);
 }
 
-bool tunnel_get_flags(Tunnel* tunnel, const bool from_socket, uint16_t* flags)
+bool tunnel_get_flags(Tunnel* tunnel, const bool from_socket, int16_t* flags)
 {
    if (tunnel->fd == -1)
       return false;
@@ -122,7 +122,7 @@ bool tunnel_get_flags(Tunnel* tunnel, const bool from_socket, uint16_t* flags)
    return true;
 }
 
-bool tunnel_set_flags(Tunnel* tunnel, const uint16_t flags, const bool keep_current, const bool to_socket)
+bool tunnel_set_flags(Tunnel* tunnel, const int16_t flags, const bool keep_current, const bool to_socket)
 {
    if (tunnel->fd == -1)
       return false;
@@ -169,11 +169,11 @@ bool tunnel_set_local_address(Tunnel* tunnel, const struct sockaddr_storage* add
    struct ifreq request;
    CLEAR(request);
    memcpy(&request.ifr_name, tunnel->if_name, IF_NAMESIZE);
-   memcpy(&request.ifr_addr, address, sizeof(address));
+   memcpy(&request.ifr_addr, address, sizeof(request.ifr_addr));
 
    if (ioctl(tunnel->socket, SIOCSIFADDR, (void*)&request) < 0)
    {
-      printf_debug("%s: error setting local address\n", __FUNCTION__ );
+      printf_debug("%s: error setting local address\n", __func__ );
       return false;
    }
    return true;
@@ -187,11 +187,11 @@ bool tunnel_set_remote_address(Tunnel* tunnel, const struct sockaddr_storage* ad
    struct ifreq request;
    CLEAR(request);
    memcpy(&request.ifr_name, tunnel->if_name, IF_NAMESIZE);
-   memcpy(&request.ifr_addr, address, sizeof(address));
+   memcpy(&request.ifr_addr, address, sizeof(request.ifr_addr));
 
    if (ioctl(tunnel->socket, SIOCSIFDSTADDR, (void*)&request) < 0)
    {
-      printf_debug("%s: error setting remote address\n", __FUNCTION__ );
+      printf_debug("%s: error setting remote address\n", __func__ );
       return false;
    }
    return true;
@@ -222,16 +222,16 @@ bool tunnel_set_addresses(Tunnel* tunnel, const struct sockaddr_storage* address
 
    char buffer[256];
    address_to_string(&address, buffer, sizeof(buffer));
-   printf_debug("%s: block %s\n", __FUNCTION__, buffer);
+   printf_debug("%s: block %s\n", __func__, buffer);
 
    *last_octet = 2;
    address_to_string(&address, buffer, sizeof(buffer));
-   printf_debug("%s: local %s\n", __FUNCTION__, buffer);
+   printf_debug("%s: local %s\n", __func__, buffer);
    ok = ok && tunnel_set_local_address(tunnel, &address);
 
    *last_octet = 1;
    address_to_string(&address, buffer, sizeof(buffer));
-   printf_debug("%s: remote %s\n", __FUNCTION__, buffer);
+   printf_debug("%s: remote %s\n", __func__, buffer);
    ok = ok && tunnel_set_remote_address(tunnel, &address);
    
    return ok;
@@ -285,7 +285,7 @@ bool tunnel_up(Tunnel* tunnel)
 
 bool tunnel_down(Tunnel* tunnel)
 {
-   uint16_t flags = 0;
+   int16_t flags = 0;
    if (!tunnel_get_flags(tunnel, true, &flags))
       return false;
 

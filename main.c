@@ -1,7 +1,6 @@
 #include "common.h"
 
 #include <getopt.h>
-#include <netdb.h>
 
 typedef enum {
    VPNMode_None,
@@ -30,50 +29,6 @@ void show_help(const char* executable)
    printf("\t-m, --mask\tspecify the network mask used for the tun device. (defaults to 255.255.255.0)\n");
    printf("\t-i, --interface\ttun device name to create or attach if it already exists. (max 15 characters)\n");
    printf("\t-p, --persist\tkeep the tun device after shutting down the vpn.\n");
-}
-
-
-bool parse_network_address(const char* address, const bool is_server, struct sockaddr_storage* socket_address)
-{
-   printf_debug("%s: parsing %s\n", __FUNCTION__, address); // debug
-
-   struct addrinfo hints;
-   CLEAR(hints);
-   hints.ai_family = AF_UNSPEC;
-   hints.ai_socktype = SOCK_DGRAM;
-   hints.ai_protocol = IPPROTO_UDP;
-   //hints.ai_flags = AI_ADDRCONFIG | (is_server ? AI_PASSIVE : 0);
-   struct addrinfo* result;
-   int ret = getaddrinfo(address, NULL, &hints, &result);
-   if (ret != 0)
-   {
-      printf("getaddrinfo: %s\n", gai_strerror(ret));
-      return false;
-   }
-
-   if (result == NULL)
-   {
-      printf_debug("%s: no suitable address found for %s\n", __FUNCTION__, address);
-      return false;
-   }
-
-   if (result->ai_family == AF_INET)
-   {
-      struct sockaddr_in* ipv4 = (struct sockaddr_in*)socket_address;
-      memcpy(ipv4, result->ai_addr, sizeof(*ipv4));
-   }
-   else if (result->ai_family == AF_INET6)
-   {
-      struct sockaddr_in6* ipv6 = (struct sockaddr_in6*)socket_address;
-      memcpy(ipv6, result->ai_addr, sizeof(*ipv6));
-   }
-
-   freeaddrinfo(result);
-
-   char text[256];
-   address_to_string(socket_address, text, sizeof(text));
-   printf_debug("%s: found address %s\n", __FUNCTION__, text);
-   return true;
 }
 
 bool parse_startup_options(int argc, char** argv, StartupOptions* result)
@@ -113,7 +68,7 @@ bool parse_startup_options(int argc, char** argv, StartupOptions* result)
 
             result->mode = VPNMode_Server;
             const char* address = optarg ? optarg : "0.0.0.0";
-            if (!parse_network_address(address, true, &result->address))
+            if (!parse_network_address(address, &result->address))
             {
                printf("invalid bind address provided\n");
                error = true;
@@ -127,21 +82,21 @@ bool parse_startup_options(int argc, char** argv, StartupOptions* result)
             }
 
             result->mode = VPNMode_Client;
-            if (!optarg || !parse_network_address(optarg, false, &result->address))
+            if (!optarg || !parse_network_address(optarg, &result->address))
             {
                printf("invalid remote address provided\n");
                error = true;
             }
             break;
          case 'a':
-            if (!parse_network_address(optarg, true, &result->tunnel_address))
+            if (!parse_network_address(optarg, &result->tunnel_address))
             {
                printf("invalid tunnel address provided\n");
                error = true;
             }
             break;
          case 'm': // TODO netmask
-          if (!parse_network_address(optarg, true, &result->tunnel_netmask))
+          if (!parse_network_address(optarg, &result->tunnel_netmask))
             {
                printf("invalid tunnel address provided\n");
                error = true;

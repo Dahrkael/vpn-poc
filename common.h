@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include <unistd.h>
+#include <netdb.h>
 #include <net/if.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -47,5 +48,50 @@ bool address_to_string(const struct sockaddr_storage* address, char* buffer, soc
       default:
          return false;
    }
+   return true;
+}
+
+bool parse_network_address(const char* address, struct sockaddr_storage* socket_address)
+{
+   printf_debug("%s: parsing %s\n", __func__, address); // debug
+
+   struct addrinfo hints;
+   CLEAR(hints);
+   hints.ai_family = AF_UNSPEC;
+   hints.ai_socktype = SOCK_DGRAM;
+   hints.ai_protocol = IPPROTO_UDP;
+   //hints.ai_flags = AI_ADDRCONFIG | (is_server ? AI_PASSIVE : 0);
+
+   // *addrinfo functionality requires POSIX extensions (__USE_XOPEN2K8)
+   struct addrinfo* result;
+   int ret = getaddrinfo(address, NULL, &hints, &result);
+   if (ret != 0)
+   {
+      printf("getaddrinfo: %s\n", gai_strerror(ret));
+      return false;
+   }
+
+   if (result == NULL)
+   {
+      printf_debug("%s: no suitable address found for %s\n", __func__, address);
+      return false;
+   }
+
+   if (result->ai_family == AF_INET)
+   {
+      struct sockaddr_in* ipv4 = (struct sockaddr_in*)socket_address;
+      memcpy(ipv4, result->ai_addr, sizeof(*ipv4));
+   }
+   else if (result->ai_family == AF_INET6)
+   {
+      struct sockaddr_in6* ipv6 = (struct sockaddr_in6*)socket_address;
+      memcpy(ipv6, result->ai_addr, sizeof(*ipv6));
+   }
+
+   freeaddrinfo(result);
+
+   char text[256];
+   address_to_string(socket_address, text, sizeof(text));
+   printf_debug("%s: found address %s\n", __func__, text);
    return true;
 }
