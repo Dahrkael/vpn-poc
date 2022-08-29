@@ -1,12 +1,7 @@
-#include <unistd.h>
-#include <getopt.h>
-
-#include <net/if.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-
 #include "common.h"
+
+#include <getopt.h>
+#include <netdb.h>
 
 typedef enum {
    VPNMode_None,
@@ -29,16 +24,19 @@ void show_help(const char* executable)
       executable = "executable";
 
    printf("\nUsage: %s {-s [<bind address>] | -c <remote address>} [-a <tunnel address>] [-m <tunnel netmask>] [-i <tunnel interface>] [-p] [-h]\n", executable);
-   printf("\t-s, --server\tstart the vpn in server mode. optionally specify the address to bind to (defaults to 0.0.0.0).\n");
+   printf("\t-s, --server\tstart the vpn in server mode. optionally specify the address to bind to (defaults to 0.0.0.0)\n");
    printf("\t-c, --connect\tstart the vpn in client mode. specify the remote server address to connect to.\n");
-   printf("\t-a, --address\tspecify the address used for the tun device (server only).\n");
-   printf("\t-n, --mask\tspecify the network mask used for the tun device (server only).\n");
-   printf("\t-i, --interface\ttun device name to create or attach if it already exists. (max 15 characters).\n");
+   printf("\t-a, --address\tspecify the address block used for the tun device. (defaults to 10.9.8.0)\n");
+   printf("\t-m, --mask\tspecify the network mask used for the tun device. (defaults to 255.255.255.0)\n");
+   printf("\t-i, --interface\ttun device name to create or attach if it already exists. (max 15 characters)\n");
    printf("\t-p, --persist\tkeep the tun device after shutting down the vpn.\n");
 }
 
+
 bool parse_network_address(const char* address, const bool is_server, struct sockaddr_storage* socket_address)
 {
+   printf_debug("%s: parsing %s\n", __FUNCTION__, address); // debug
+
    struct addrinfo hints;
    CLEAR(hints);
    hints.ai_family = AF_UNSPEC;
@@ -53,7 +51,28 @@ bool parse_network_address(const char* address, const bool is_server, struct soc
       return false;
    }
 
+   if (result == NULL)
+   {
+      printf_debug("%s: no suitable address found for %s\n", __FUNCTION__, address);
+      return false;
+   }
+
+   if (result->ai_family == AF_INET)
+   {
+      struct sockaddr_in* ipv4 = (struct sockaddr_in*)socket_address;
+      memcpy(ipv4, result->ai_addr, sizeof(*ipv4));
+   }
+   else if (result->ai_family == AF_INET6)
+   {
+      struct sockaddr_in6* ipv6 = (struct sockaddr_in6*)socket_address;
+      memcpy(ipv6, result->ai_addr, sizeof(*ipv6));
+   }
+
    freeaddrinfo(result);
+
+   char text[256];
+   address_to_string(socket_address, text, sizeof(text));
+   printf_debug("%s: found address %s\n", __FUNCTION__, text);
    return true;
 }
 
@@ -122,6 +141,11 @@ bool parse_startup_options(int argc, char** argv, StartupOptions* result)
             }
             break;
          case 'm': // TODO netmask
+          if (!parse_network_address(optarg, true, &result->tunnel_netmask))
+            {
+               printf("invalid tunnel address provided\n");
+               error = true;
+            }
             break;
          case 'i':
             if (optarg)
@@ -181,6 +205,17 @@ int main(int argc, char** argv)
    }
 
    printf("tunnel open on interface %s\n", tunnel.if_name);
+   if (!tunnel_set_addresses(&tunnel, &startup_options.tunnel_address))
+   {
+      printf("failed to set tunnel addresses\n");
+      return 0;
+   }
+   if (!tunnel_set_network_mask(&tunnel, &startup_options.tunnel_netmask))
+   {
+      printf("failed to set tunnel network mask\n");
+      return 0;
+   }
+   tunnel_up(&tunnel);
 
    while(1)
    {
