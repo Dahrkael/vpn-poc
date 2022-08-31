@@ -202,8 +202,19 @@ int main(int argc, char** argv)
    // activate the tunnel
    tunnel_up(&tunnel);
 
+   uint32_t mtu = 0;
+   tunnel_get_mtu(&tunnel, &mtu);
+   assert(mtu > 0);
+
+   uint8_t buffer[mtu];
    while(1)
    {
+      CLEAR(buffer);
+      uint32_t length = sizeof(buffer);
+      if (tunnel_read(&tunnel, buffer, &length))
+      {
+         printf("received data through the tunnel: %u bytes\n", length);
+      }
       sleep(1);
    }
 

@@ -1,5 +1,6 @@
 #include "common.h"
 
+#include <errno.h>
 #include <fcntl.h>
 #include <linux/if.h>
 #include <linux/if_tun.h>
@@ -70,6 +71,7 @@ bool tunnel_open(Tunnel* tunnel, const char* name)
    if (name && *name)
       strncpy(device_name, name, IF_NAMESIZE);
 
+   // create or open an existing TUN device
    int32_t fd = allocate_tun_device(device_name);
    if (fd < 0)
    {
@@ -77,6 +79,15 @@ bool tunnel_open(Tunnel* tunnel, const char* name)
       return false;
    }
 
+   // mark the TUN descriptor as non-blocking
+   int32_t fd_flags = fcntl(fd, F_GETFL);
+	if (fd_flags < 0 || fcntl(fd, F_SETFL, fd_flags | O_NONBLOCK)) 
+   {
+      printf("faileld to mark tun descriptor as non-blocking\n");
+      close(fd);
+	}
+
+   // the TUN device needs an associated socket to configure the addresses
    int32_t s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
    if (s < 0)
    {
@@ -115,7 +126,7 @@ bool tunnel_get_flags(Tunnel* tunnel, const bool from_socket, int16_t* flags)
    memcpy(&request.ifr_name, tunnel->if_name, IF_NAMESIZE);
 
    int ret = ioctl(from_socket ? tunnel->socket : tunnel->fd, SIOCGIFFLAGS, (void*)&request);
-   if ( ret == -1)
+   if (ret == -1)
       return false;
 
    *flags = request.ifr_flags;
@@ -250,6 +261,23 @@ bool tunnel_set_network_mask(Tunnel* tunnel, const struct sockaddr_storage* mask
    return ioctl(tunnel->socket, SIOCSIFNETMASK, (void*)&request) == 0;
 }
 
+bool tunnel_get_mtu(Tunnel* tunnel, uint32_t* mtu)
+{
+   if (tunnel->fd == -1 || tunnel->socket == -1)
+      return false;
+
+   struct ifreq request;
+   CLEAR(request);
+   memcpy(&request.ifr_name, tunnel->if_name, IF_NAMESIZE);
+
+   int32_t ret = ioctl(tunnel->socket, SIOCGIFMTU, (void*)&request);
+   if (ret == -1)
+      return false;
+
+   *mtu = request.ifr_mtu;
+   return true;
+}
+
 bool tunnel_set_mtu(Tunnel* tunnel, const uint32_t mtu)
 {
    if (tunnel->fd == -1 || tunnel->socket == -1)
@@ -291,4 +319,45 @@ bool tunnel_down(Tunnel* tunnel)
 
    flags &= ~(IFF_UP | IFF_RUNNING);
    return tunnel_set_flags(tunnel, flags, false, true);
+}
+
+bool tunnel_read(Tunnel* tunnel, uint8_t* buffer, uint32_t* length)
+{
+   ssize_t count = read(tunnel->fd, buffer, *length);
+   if (count >= 0)
+   {
+      *length = (uint32_t)count;
+      return true;
+   }
+
+   // non-blocking may return EAGAIN if data is not ready
+   int32_t error = errno;
+   if (error != EAGAIN)
+   {
+      char buffer[256];
+      strerror_r(error, buffer, sizeof(buffer));
+      printf("%s: error reading from tunnel [ %s ]", __func__, buffer);
+   }
+   return false;
+}
+
+bool tunnel_write(Tunnel* tunnel, const uint8_t* buffer, const uint32_t length)
+{
+   ssize_t count = write(tunnel->fd, buffer, length);
+   
+   if (count >= 0)
+   {
+      assert(count == length);
+      return true;
+   }
+
+   // non-blocking may return EAGAIN
+   int32_t error = errno;
+   if (error != EAGAIN)
+   {
+      char buffer[256];
+      strerror_r(error, buffer, sizeof(buffer));
+      printf("%s: error reading from tunnel [ %s ]", __func__, buffer);
+   }
+   return false;
 }
