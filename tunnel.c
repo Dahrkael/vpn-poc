@@ -1,7 +1,5 @@
 #include "common.h"
 
-#include <errno.h>
-#include <fcntl.h>
 #include <linux/if.h>
 #include <linux/if_tun.h>
 #include <sys/ioctl.h>
@@ -58,8 +56,16 @@ int32_t allocate_tun_device(char* device_name)
    return tun_fd;
 }
 
+bool tunnel_is_valid(Tunnel* tunnel)
+{
+    return (tunnel && tunnel->fd != -1);
+}
+
 bool tunnel_open(Tunnel* tunnel, const char* name)
 {
+   if (!tunnel)
+      return false;
+
    if (!check_tun_privileges())
    {
       printf("not enough privileges to read & write /dev/net/tun\n");
@@ -106,6 +112,9 @@ bool tunnel_open(Tunnel* tunnel, const char* name)
 
 void tunnel_close(Tunnel* tunnel)
 {
+   if (!tunnel)
+      return;
+
    close(tunnel->fd);
    tunnel->fd = -1;
    close(tunnel->socket);
@@ -115,10 +124,10 @@ void tunnel_close(Tunnel* tunnel)
 
 bool tunnel_get_flags(Tunnel* tunnel, const bool from_socket, int16_t* flags)
 {
-   if (tunnel->fd == -1)
+   if (!tunnel_is_valid(tunnel))
       return false;
 
-   if (from_socket && tunnel->fd == -1)
+   if (from_socket && tunnel->socket == -1)
       return false;
 
    struct ifreq request; 
@@ -135,7 +144,7 @@ bool tunnel_get_flags(Tunnel* tunnel, const bool from_socket, int16_t* flags)
 
 bool tunnel_set_flags(Tunnel* tunnel, const int16_t flags, const bool keep_current, const bool to_socket)
 {
-   if (tunnel->fd == -1)
+   if (!tunnel_is_valid(tunnel))
       return false;
 
    if (to_socket && tunnel->fd == -1)
@@ -159,7 +168,7 @@ bool tunnel_set_flags(Tunnel* tunnel, const int16_t flags, const bool keep_curre
 
 bool tunnel_set_name(Tunnel* tunnel, const char* name)
 {
-   if (tunnel->fd == -1)
+   if (!tunnel_is_valid(tunnel))
       return false;
 
    struct ifreq request;
@@ -174,7 +183,10 @@ bool tunnel_set_name(Tunnel* tunnel, const char* name)
 
 bool tunnel_set_local_address(Tunnel* tunnel, const struct sockaddr_storage* address)
 {
-   if (tunnel->fd == -1 || tunnel->socket == -1)
+   if (!tunnel_is_valid(tunnel))
+      return false;
+
+   if (tunnel->socket == -1)
       return false;
 
    struct ifreq request;
@@ -192,7 +204,10 @@ bool tunnel_set_local_address(Tunnel* tunnel, const struct sockaddr_storage* add
 
 bool tunnel_set_remote_address(Tunnel* tunnel, const struct sockaddr_storage* address)
 {
-   if (tunnel->fd == -1 || tunnel->socket == -1)
+   if (!tunnel_is_valid(tunnel))
+      return false;
+      
+   if (tunnel->socket == -1)
       return false;
 
    struct ifreq request;
@@ -210,6 +225,9 @@ bool tunnel_set_remote_address(Tunnel* tunnel, const struct sockaddr_storage* ad
 
 bool tunnel_set_addresses(Tunnel* tunnel, const struct sockaddr_storage* address_block)
 {
+   if (!tunnel_is_valid(tunnel))
+      return false;
+      
    if (address_block->ss_family != AF_INET)
    {
       printf("error: IPv6 not implemented\n");
@@ -250,7 +268,10 @@ bool tunnel_set_addresses(Tunnel* tunnel, const struct sockaddr_storage* address
 
 bool tunnel_set_network_mask(Tunnel* tunnel, const struct sockaddr_storage* mask)
 {
-   if (tunnel->fd == -1 || tunnel->socket == -1)
+   if (!tunnel_is_valid(tunnel))
+      return false;
+      
+   if (tunnel->socket == -1)
       return false;
 
    struct ifreq request;
@@ -263,7 +284,10 @@ bool tunnel_set_network_mask(Tunnel* tunnel, const struct sockaddr_storage* mask
 
 bool tunnel_get_mtu(Tunnel* tunnel, uint32_t* mtu)
 {
-   if (tunnel->fd == -1 || tunnel->socket == -1)
+   if (!tunnel_is_valid(tunnel))
+      return false;
+      
+   if (tunnel->socket == -1)
       return false;
 
    struct ifreq request;
@@ -280,7 +304,10 @@ bool tunnel_get_mtu(Tunnel* tunnel, uint32_t* mtu)
 
 bool tunnel_set_mtu(Tunnel* tunnel, const uint32_t mtu)
 {
-   if (tunnel->fd == -1 || tunnel->socket == -1)
+   if (!tunnel_is_valid(tunnel))
+      return false;
+      
+   if (tunnel->socket == -1)
       return false;
 
    struct ifreq request;
@@ -293,7 +320,7 @@ bool tunnel_set_mtu(Tunnel* tunnel, const uint32_t mtu)
 
 bool tunnel_persist(Tunnel* tunnel, const bool on)
 {
-   if (tunnel->fd == -1)
+   if (!tunnel_is_valid(tunnel))
       return false;
 
    if (on)
@@ -323,6 +350,9 @@ bool tunnel_down(Tunnel* tunnel)
 
 bool tunnel_read(Tunnel* tunnel, uint8_t* buffer, uint32_t* length)
 {
+   if (!tunnel_is_valid(tunnel))
+      return false;
+      
    ssize_t count = read(tunnel->fd, buffer, *length);
    if (count >= 0)
    {
@@ -333,16 +363,16 @@ bool tunnel_read(Tunnel* tunnel, uint8_t* buffer, uint32_t* length)
    // non-blocking may return EAGAIN if data is not ready
    int32_t error = errno;
    if (error != EAGAIN)
-   {
-      char buffer[256];
-      strerror_r(error, buffer, sizeof(buffer));
-      printf("%s: error reading from tunnel [ %s ]", __func__, buffer);
-   }
+      print_errno(__func__, "error reading from tunnel", error);
+   
    return false;
 }
 
 bool tunnel_write(Tunnel* tunnel, const uint8_t* buffer, const uint32_t length)
 {
+   if (!tunnel_is_valid(tunnel))
+      return false;
+      
    ssize_t count = write(tunnel->fd, buffer, length);
    
    if (count >= 0)
@@ -354,10 +384,7 @@ bool tunnel_write(Tunnel* tunnel, const uint8_t* buffer, const uint32_t length)
    // non-blocking may return EAGAIN
    int32_t error = errno;
    if (error != EAGAIN)
-   {
-      char buffer[256];
-      strerror_r(error, buffer, sizeof(buffer));
-      printf("%s: error reading from tunnel [ %s ]", __func__, buffer);
-   }
+      print_errno(__func__, "error writing to tunnel", error);
+
    return false;
 }
