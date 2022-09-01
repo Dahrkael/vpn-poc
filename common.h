@@ -6,6 +6,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <errno.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <netdb.h>
 #include <net/if.h>
@@ -33,6 +35,13 @@ void printf_debug(const char* format, ...)
     vprintf(format, args);
     va_end(args);
 #endif
+}
+
+void print_errno(const char* prefix, const char* message, int32_t error)
+{
+   char buffer[256];
+   strerror_r(error, buffer, sizeof(buffer));
+   printf("%s: %s [ %s ]\n", prefix, message, buffer);
 }
 
 bool address_to_string(const struct sockaddr_storage* address, char* buffer, socklen_t length)
