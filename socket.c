@@ -99,6 +99,19 @@ bool socket_set_buffer_sizes(Socket* socket, const int32_t recv_size, const int3
     return true;
 }
 
+bool socket_set_mark(Socket* socket, const uint32_t mark)
+{
+    if (!socket_is_valid(socket))
+        return false;
+        
+    if (setsockopt(socket->fd, SOL_SOCKET, SO_MARK, &mark, sizeof(mark)) == -1)
+    {
+        print_errno(__func__, "error setting socket firewall mark", errno);
+        return false;
+    }
+    return true;
+}
+
 bool socket_connect(Socket* socket, const struct sockaddr_storage* address)
 {
     if (!socket_is_valid(socket))
