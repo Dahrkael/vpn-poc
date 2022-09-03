@@ -16,9 +16,6 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
-// set to 0 to disable debug logs
-#define DEBUG 1 
-
 // custom bool type since C doesn't have one
 typedef enum {
    false = 0,
@@ -138,4 +135,5 @@ typedef struct {
    struct sockaddr_storage tunnel_netmask;
    uint16_t mtu;
    bool persistent;
+   bool debug_mode;
 } StartupOptions;
