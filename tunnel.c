@@ -33,7 +33,10 @@ int32_t allocate_tun_device(char* device_name)
 
    int32_t tun_fd = open("/dev/net/tun", O_RDWR);
    if (tun_fd < 0)
+   {
+      print_errno(__func__, "failed to open /dev/net/tun", errno);
       return -1;
+   }
 
    // IFF_TUN   - TUN device (no Ethernet headers)
    // IFF_NO_PI - Do not provide packet information
@@ -45,8 +48,10 @@ int32_t allocate_tun_device(char* device_name)
    if( *device_name )
       strncpy(request.ifr_name, device_name, IF_NAMESIZE);
 
+   printf_debug("%s: requesting interface %s\n", __func__, request.ifr_name);
    if ( ioctl(tun_fd, TUNSETIFF, (void*)&request) < 0 )
    {
+      print_errno(__func__, "failed to setup interface", errno);
       close(tun_fd);
       return -1;
    }
@@ -66,16 +71,11 @@ bool tunnel_open(Tunnel* tunnel, const char* name)
    if (!tunnel)
       return false;
 
-   if (!check_tun_privileges())
-   {
-      printf("not enough privileges to read & write /dev/net/tun\n");
-      return false;
-   }
-
    char device_name[IF_NAMESIZE];
+   CLEAR(device_name);
    // custom name is optional
    if (name && *name)
-      strncpy(device_name, name, IF_NAMESIZE);
+      strncpy(device_name, name, IF_NAMESIZE-1);
 
    // create or open an existing TUN device
    int32_t fd = allocate_tun_device(device_name);
@@ -107,7 +107,7 @@ bool tunnel_open(Tunnel* tunnel, const char* name)
    // populate the tunnel with the final data
    tunnel->fd = fd;
    tunnel->socket = s;
-   strncpy(tunnel->if_name, device_name, IF_NAMESIZE);
+   strncpy(tunnel->if_name, device_name, IF_NAMESIZE-1);
 
    return true;
 }
