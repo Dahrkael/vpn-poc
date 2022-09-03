@@ -1,6 +1,7 @@
 #include "common.h"
 
-// only UDP is actively supported right now
+// socket wrapper to simplify the BSD interface
+// UDP is assumed right now
 
 typedef struct {
     int fd;
@@ -13,6 +14,16 @@ typedef enum
 	SR_Success = 1
 } SocketResult;
 
+bool socket_clear(Socket* socket)
+{
+    if (!socket)
+        return false;
+
+    memset(socket, 0, sizeof(Socket));
+    socket->fd = -1;
+    return true;
+}
+
 bool socket_is_valid(Socket* socket)
 {
     return (socket && socket->fd != -1);
@@ -20,7 +31,7 @@ bool socket_is_valid(Socket* socket)
 
 bool socket_open(Socket* sock, const bool ipV6, const bool nonblocking)
 {  
-    if (!socket_is_valid(sock))
+    if (!sock)
         return false;
         
     int s = socket(ipV6 ? AF_INET6 : AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -58,6 +69,9 @@ bool socket_open(Socket* sock, const bool ipV6, const bool nonblocking)
     }
 
     // set the socket only if everything went fine
+    if (sock->fd != -1)
+        close(sock->fd);
+
     sock->fd = s;
 
     return true;
@@ -103,7 +117,7 @@ bool socket_set_mark(Socket* socket, const uint32_t mark)
 {
     if (!socket_is_valid(socket))
         return false;
-        
+
     if (setsockopt(socket->fd, SOL_SOCKET, SO_MARK, &mark, sizeof(mark)) == -1)
     {
         print_errno(__func__, "error setting socket firewall mark", errno);
