@@ -136,5 +136,6 @@ typedef struct {
    struct sockaddr_storage address;
    struct sockaddr_storage tunnel_address;
    struct sockaddr_storage tunnel_netmask;
+   uint16_t mtu;
    bool persistent;
 } StartupOptions;

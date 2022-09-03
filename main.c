@@ -31,11 +31,12 @@ bool parse_startup_options(int argc, char** argv, StartupOptions* result)
       {"connect",    required_argument,   0, 'c'}, // client mode connecting to specified server address
       {"address",    required_argument,   0, 'a'}, // tunnel address
       {"mask",       required_argument,   0, 'm'}, // tunnel network mask
+      {"mtu",        required_argument,   0, 'l'}, // socket & tunnel mtu
       {"interface",  required_argument,   0, 'i'}, // tun device to use
       {"persist",    no_argument,         0, 'p'}, // keep the set tun device 
       {0, 0, 0, 0}
    };
-   const char* short_options = ":s::c:a:m:i:p";
+   const char* short_options = ":s::c:a:m:l:i:p";
 
    bool error = false;
    while(1)
@@ -71,7 +72,7 @@ bool parse_startup_options(int argc, char** argv, StartupOptions* result)
             }
 
             result->mode = VPNMode_Client;
-            if (!optarg || !parse_network_address(optarg, &result->address))
+            if (!parse_network_address(optarg, &result->address))
             {
                printf("invalid remote address provided\n");
                error = true;
@@ -84,19 +85,33 @@ bool parse_startup_options(int argc, char** argv, StartupOptions* result)
                error = true;
             }
             break;
-         case 'm': // TODO netmask
+         case 'm':
           if (!parse_network_address(optarg, &result->tunnel_netmask))
             {
                printf("invalid tunnel address provided\n");
                error = true;
             }
             break;
+         case 'l':
+         {
+            uint32_t mtu = atoi(optarg);
+            if (mtu < 576)
+            {
+               printf("mtu has to be at least 576 bytes");
+               error = true;
+            }
+            if (mtu > UINT16_MAX) 
+            {
+               printf("mtu cannot exceed %u bytes", UINT16_MAX);
+               error = true;
+            }
+            result->mtu = (uint16_t)mtu;
+            break;
+         }
          case 'i':
-            if (optarg)
                strncpy(result->interface, optarg, IF_NAMESIZE);
             break;
          case 'p':
-            if (optarg)
                result->persistent = true;
             break;
          default: // group options that show the help
@@ -150,7 +165,7 @@ int main(int argc, char** argv)
 
    // prepare the local peer
    printf("creating local peer in %s mode\n", startup_options.mode == VPNMode_Server ? "SERVER" : "CLIENT");
-   Peer* local_peer = peer_create();
+   Peer* local_peer = peer_create(startup_options.mtu);
    if (!local_peer)
    {
       printf("failed to create peer. not enough memory?");
@@ -175,6 +190,6 @@ int main(int argc, char** argv)
       peer_service(local_peer);
       sleep(1);
    }
-   
+
    return 0;
 }

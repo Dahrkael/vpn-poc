@@ -20,9 +20,6 @@ struct remote_peer_t {
     uint8_t id;
     PeerState state;
     struct sockaddr_storage address;
-    uint32_t buffer_size;
-    uint8_t* recv_buffer;
-    uint8_t* send_buffer;
 
     // linked list members
     RemotePeer* prev;
@@ -34,30 +31,19 @@ typedef struct {
     Tunnel tunnel;
     Socket socket;
 
+    uint32_t buffer_size;
     uint8_t* recv_buffer;
     uint8_t* send_buffer;
     RemotePeer* remote_peers;
 } Peer;
 
-RemotePeer* remotepeer_create(const uint32_t buffer_size)
+RemotePeer* remotepeer_create()
 {
     RemotePeer* peer = (RemotePeer*)malloc(sizeof(RemotePeer));
     if (!peer)
         return NULL;
 
     memset(peer, 0, sizeof(RemotePeer));
-
-    peer->buffer_size = buffer_size;
-    peer->recv_buffer = (uint8_t*)malloc(buffer_size);
-    peer->send_buffer = (uint8_t*)malloc(buffer_size);
-    if (!peer->recv_buffer || !peer->send_buffer)
-    {
-        free(peer->recv_buffer);
-        free(peer->send_buffer);
-        free(peer);
-        peer = NULL;
-    }
-
     return peer;
 }
 
@@ -65,12 +51,6 @@ void remotepeer_destroy(RemotePeer* peer)
 {
     if (!peer)
         return;
-
-    // delete buffers
-    if (peer->recv_buffer)
-        free(peer->recv_buffer);
-     if (peer->send_buffer)
-        free(peer->send_buffer);
 
     // remove the peer from the list
     if (peer->prev)
@@ -81,7 +61,7 @@ void remotepeer_destroy(RemotePeer* peer)
     peer = NULL;
 }
 
-Peer* peer_create()
+Peer* peer_create(const uint32_t buffer_size)
 {
     Peer* peer = (Peer*)malloc(sizeof(Peer));
     if (!peer)
@@ -89,6 +69,18 @@ Peer* peer_create()
 
     memset(peer, 0, sizeof(Peer));
     socket_clear(&peer->socket);
+
+    peer->buffer_size = buffer_size > 0 ? buffer_size : DEFAULT_BUFFER_SIZE;
+    peer->recv_buffer = (uint8_t*)malloc(peer->buffer_size);
+    peer->send_buffer = (uint8_t*)malloc(peer->buffer_size);
+    if (!peer->recv_buffer || !peer->send_buffer)
+    {
+        free(peer->recv_buffer);
+        free(peer->send_buffer);
+        free(peer);
+        peer = NULL;
+    }
+
     return peer;
 }
 
@@ -102,6 +94,12 @@ void peer_destroy(Peer* peer)
     // shut down tunnel
     tunnel_down(&peer->tunnel);
     tunnel_close(&peer->tunnel);
+
+    // delete buffers
+    if (peer->recv_buffer)
+        free(peer->recv_buffer);
+     if (peer->send_buffer)
+        free(peer->send_buffer);
 
     // delete remote peer list
     RemotePeer* remote_peer = peer->remote_peers;
@@ -136,7 +134,7 @@ bool peer_initialize2(Peer* peer, const VPNMode mode, const struct sockaddr_stor
     if (!tunnel_open(&peer->tunnel, interface ))
         return false;
 
-    tunnel_set_mtu(&peer->tunnel, DEFAULT_BUFFER_SIZE);
+    tunnel_set_mtu(&peer->tunnel, peer->buffer_size);
 
     return true;
 }
@@ -207,7 +205,7 @@ bool peer_connect(Peer* peer, const struct sockaddr_storage* address)
         return false;
 
     // create a remote peer representing the server
-    RemotePeer* remote_peer = remotepeer_create(DEFAULT_BUFFER_SIZE);
+    RemotePeer* remote_peer = remotepeer_create();
     assert(remote_peer);
 
     remote_peer->state = PS_Handshaking;
@@ -220,13 +218,11 @@ bool peer_connect(Peer* peer, const struct sockaddr_storage* address)
 
 bool peer_service_client(Peer* peer)
 {
-    uint8_t recv_buffer[DEFAULT_BUFFER_SIZE];
-    uint8_t send_buffer[DEFAULT_BUFFER_SIZE];
     do {
         // read incoming data from the socket
         struct sockaddr_storage remote;
-        uint32_t read = DEFAULT_BUFFER_SIZE;
-        SocketResult ret = socket_receive(&peer->socket, recv_buffer, &read, &remote);
+        uint32_t read = peer->buffer_size;
+        SocketResult ret = socket_receive(&peer->socket, peer->recv_buffer, &read, &remote);
         if (ret == SR_Error)
             return false;
         if (ret == SR_Pending)
@@ -234,22 +230,22 @@ bool peer_service_client(Peer* peer)
         if (ret == SR_Success)
         {
             printf_debug("socket received %u bytes\n", read);
-            if (!tunnel_write(&peer->tunnel, recv_buffer, read))
+            if (!tunnel_write(&peer->tunnel, peer->recv_buffer, read))
                 return false;
         }
     } while(true);
 
     do {
         // read outgoing data from the tunnel
-        uint32_t read = DEFAULT_BUFFER_SIZE;
-        if (!tunnel_read(&peer->tunnel, send_buffer, &read))
+        uint32_t read = peer->buffer_size;
+        if (!tunnel_read(&peer->tunnel, peer->send_buffer, &read))
             break; // no more data to read
         // send tunnel data through the socket
         if (read > 0)
         {
             printf_debug("tunnel received %u bytes\n", read);
             uint32_t sent = read;
-            if (!socket_send(&peer->socket, send_buffer, &sent, &peer->remote_peers->address))
+            if (!socket_send(&peer->socket, peer->send_buffer, &sent, &peer->remote_peers->address))
                 return false;
             assert(read == sent);
         }
