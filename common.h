@@ -62,6 +62,22 @@ bool address_to_string(const struct sockaddr_storage* address, char* buffer, soc
    return true;
 }
 
+bool assign_address_port(struct sockaddr_storage* address, const uint16_t port)
+{
+    switch (address->ss_family)
+   {
+      case AF_INET:
+         ((struct sockaddr_in*)address)->sin_port = htons(port);
+      break;
+      case AF_INET6:
+         ((struct sockaddr_in6*)address)->sin6_port = htons(port);
+      break;
+      default:
+         return false;
+   }
+   return true;
+}
+
 bool parse_network_address(const char* address, struct sockaddr_storage* socket_address)
 {
    printf_debug("%s: parsing %s\n", __func__, address); // debug
