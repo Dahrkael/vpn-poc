@@ -126,6 +126,7 @@ bool socket_set_mark(Socket* socket, const uint32_t mark)
     return true;
 }
 
+// connect only allows incoming/outgoing packets from/to the specified address
 bool socket_connect(Socket* socket, const struct sockaddr_storage* address)
 {
     if (!socket_is_valid(socket))
@@ -148,6 +149,7 @@ bool socket_connect(Socket* socket, const struct sockaddr_storage* address)
     return true; 
 }
 
+// bind allows incoming packets from unknown addresses
 bool socket_bind(Socket* socket, const struct sockaddr_storage* address)
 {
     if (!socket_is_valid(socket))
@@ -193,6 +195,7 @@ SocketResult socket_receive(Socket* socket, uint8_t* buffer, uint32_t* length, s
         if (error == EAGAIN || error == EWOULDBLOCK)
             return SR_Pending;
 
+        print_errno(__func__, "error reading from socket", error);
         return SR_Error;
     }
 
@@ -211,6 +214,8 @@ SocketResult socket_send(Socket* socket, const uint8_t* buffer, uint32_t* length
         int32_t error = errno;
         if (error == EAGAIN || error == EWOULDBLOCK)
             return SR_Pending;
+
+        print_errno(__func__, "error writing to socket", error);
         if (error == EMSGSIZE) // this should be recoverable
             return SR_Error;
         return SR_Error;
@@ -218,4 +223,17 @@ SocketResult socket_send(Socket* socket, const uint8_t* buffer, uint32_t* length
 
     *length = (uint32_t)sent;
     return SR_Success;
+}
+
+bool check_socket_privileges()
+{
+    Socket dummy;
+    if (!socket_open(&dummy, false, true))
+        return false;
+
+    if (!socket_set_mark(&dummy, 0x1))
+        return false;
+
+    socket_close(&dummy);
+    return true;
 }
