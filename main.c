@@ -1,21 +1,7 @@
 #include "common.h"
 
 #include <getopt.h>
-
-typedef enum {
-   VPNMode_None,
-   VPNMode_Server,
-   VPNMode_Client
-} VPNMode;
-
-typedef struct {
-   VPNMode mode;
-   char interface[IF_NAMESIZE];
-   struct sockaddr_storage address;
-   struct sockaddr_storage tunnel_address;
-   struct sockaddr_storage tunnel_netmask;
-   bool persistent;
-} StartupOptions;
+#include <netinet/ip.h>
 
 void show_help(const char* executable)
 {
@@ -140,6 +126,12 @@ bool parse_startup_options(int argc, char** argv, StartupOptions* result)
 
 int main(int argc, char** argv)
 {
+   if (!check_tun_privileges())
+   {
+      printf("this program needs root or NET_CAP_ADMIN privileges");
+      return 0;
+   }
+
    StartupOptions startup_options;
    CLEAR(startup_options);
 
@@ -149,77 +141,59 @@ int main(int argc, char** argv)
       show_help(argv[0]);
       return 0;
    }
-   
-   Tunnel tunnel;
-   CLEAR(tunnel);
 
-   if (!tunnel_open(&tunnel, startup_options.interface))
+   // prepare the local peer
+   printf("creating local peer\n");
+   Peer* local_peer = peer_create();
+   if (!local_peer)
    {
-      printf("failed to open a tunnel\n");
-      return 0;
-   }
-
-   printf("tunnel open on interface %s\n", tunnel.if_name);
-
-   // set specified local and remote addresses or defaults
-   struct sockaddr_storage address;
-   if (startup_options.tunnel_address.ss_family == AF_UNSPEC)
-   {
-      const char* default_tunnel_address = "10.9.8.0";
-      address.ss_family = AF_INET;
-      ((struct sockaddr_in*)&address)->sin_addr.s_addr = inet_addr(default_tunnel_address);
-   }
-   else
-   {
-      memcpy(&address, &startup_options.tunnel_address, sizeof(address));
+      printf("failed to create peer. not enough memory?");
+      return -1;
    }
 
-   if (!tunnel_set_addresses(&tunnel, &address))
+   if (!peer_initialize(local_peer, &startup_options))
    {
-      printf("failed to set tunnel addresses\n");
-      return 0;
+      printf("failed to initialize peer\n");
+      peer_destroy(local_peer);
+      return -1;
    }
 
-   // set specified network mask or default
-   struct sockaddr_storage netmask;
-   if (startup_options.tunnel_netmask.ss_family == AF_UNSPEC)
-   {
-      const char* default_tunnel_netmask = "255.255.255.0";
-      netmask.ss_family = AF_INET;
-      ((struct sockaddr_in*)&netmask)->sin_addr.s_addr = inet_addr(default_tunnel_netmask);
-   }
-   else
-   {
-      memcpy(&netmask, &startup_options.tunnel_netmask, sizeof(netmask));
-   }
-
-   if (!tunnel_set_network_mask(&tunnel, &netmask))
-   {
-      printf("failed to set tunnel network mask\n");
-      return 0;
-   }
+   printf("local peer ready\n");
 
    // activate the tunnel
-   tunnel_up(&tunnel);
+   tunnel_up(&local_peer->tunnel);
 
    uint32_t mtu = 0;
-   tunnel_get_mtu(&tunnel, &mtu);
+   tunnel_get_mtu(&local_peer->tunnel, &mtu);
    assert(mtu > 0);
 
    uint8_t buffer[mtu];
    while(1)
    {
-      CLEAR(buffer);
-      uint32_t length = sizeof(buffer);
-      if (tunnel_read(&tunnel, buffer, &length))
+      memset(buffer, 0, mtu);
+      uint32_t length = mtu;
+      if (tunnel_read(&local_peer->tunnel, buffer, &length))
       {
          printf("received data through the tunnel: %u bytes\n", length);
+         if (length > sizeof(struct iphdr))
+         {
+            struct iphdr* header = (struct iphdr*)buffer;
+            if (header->version == 4)
+            {
+               printf("buffer length: [ %u ] ip packet length [ %hu ]\n", length, ntohs(header->tot_len));
+               struct in_addr source; source.s_addr = header->saddr;
+               printf("origin: [ %s ]\n", inet_ntoa(source));
+               struct in_addr destination; destination.s_addr = header->daddr;
+               printf("destination: [ %s ]\n", inet_ntoa(destination));
+            }
+            else
+            {
+               printf("received data is not IPv4: %u %u\n", header->version, header->ihl);
+            }
+         }
       }
       sleep(1);
    }
-
-   tunnel_down(&tunnel);
-   tunnel_close(&tunnel);
 
    return 0;
 }

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <errno.h>
@@ -25,6 +26,7 @@ typedef enum {
 } bool;
 
 #define CLEAR(structure) memset(&structure, 0, sizeof(structure));
+#define STATIC_ASSERT(condition, message) typedef char static_assertion_##message[(condition) ? 1 : -1]
 
 void printf_debug(const char* format, ...) 
 {
@@ -104,3 +106,19 @@ bool parse_network_address(const char* address, struct sockaddr_storage* socket_
    printf_debug("%s: found address %s\n", __func__, text);
    return true;
 }
+
+typedef enum {
+   VPNMode_None,
+   VPNMode_Server,
+   VPNMode_Client
+} VPNMode;
+
+// arguments passed to the program to customize the local peer
+typedef struct {
+   VPNMode mode;
+   char interface[IF_NAMESIZE];
+   struct sockaddr_storage address;
+   struct sockaddr_storage tunnel_address;
+   struct sockaddr_storage tunnel_netmask;
+   bool persistent;
+} StartupOptions;

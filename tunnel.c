@@ -4,12 +4,12 @@
 #include <linux/if_tun.h>
 #include <sys/ioctl.h>
 
+// tunnel wrapper to abstract TUN device management
+
 // mkdir /dev/net (if it doesn't exist already)
 // mknod /dev/net/tun c 10 200
 // chmod 0666 /dev/net/tun
 // modprobe tun
-
-// TODO TUNSETSNDBUF 
 
 typedef struct
 {
@@ -92,6 +92,8 @@ bool tunnel_open(Tunnel* tunnel, const char* name)
       printf("faileld to mark tun descriptor as non-blocking\n");
       close(fd);
 	}
+
+   // TODO TUNSETSNDBUF
 
    // the TUN device needs an associated socket to configure the addresses
    int32_t s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -279,7 +281,12 @@ bool tunnel_set_network_mask(Tunnel* tunnel, const struct sockaddr_storage* mask
    memcpy(&request.ifr_name, tunnel->if_name, IF_NAMESIZE);
    memcpy(&request.ifr_netmask, mask, sizeof(request.ifr_netmask));
 
-   return ioctl(tunnel->socket, SIOCSIFNETMASK, (void*)&request) == 0;
+   if (ioctl(tunnel->socket, SIOCSIFNETMASK, (void*)&request) < 0)
+   {
+      printf_debug("%s: error setting network mask\n", __func__ );
+      return false;
+   }
+   return true;
 }
 
 bool tunnel_get_mtu(Tunnel* tunnel, uint32_t* mtu)
@@ -372,7 +379,7 @@ bool tunnel_write(Tunnel* tunnel, const uint8_t* buffer, const uint32_t length)
 {
    if (!tunnel_is_valid(tunnel))
       return false;
-      
+
    ssize_t count = write(tunnel->fd, buffer, length);
    
    if (count >= 0)

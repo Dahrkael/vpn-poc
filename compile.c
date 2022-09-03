@@ -3,4 +3,5 @@
 
 #include "tunnel.c"
 #include "socket.c"
+#include "peer.c"
 #include "main.c"
