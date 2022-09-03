@@ -34,6 +34,7 @@ bool parse_startup_options(int argc, char** argv, StartupOptions* result)
       {"mtu",        required_argument,   0, 'l'}, // socket & tunnel mtu
       {"interface",  required_argument,   0, 'i'}, // tun device to use
       {"persist",    no_argument,         0, 'p'}, // keep the set tun device 
+      {"debug",      no_argument,         0, 'd'}, // debug mode
       {0, 0, 0, 0}
    };
    const char* short_options = ":s::c:a:m:l:i:p";
@@ -114,6 +115,9 @@ bool parse_startup_options(int argc, char** argv, StartupOptions* result)
          case 'p':
                result->persistent = true;
             break;
+         case 'd':
+            result->debug_mode = true;
+            break;
          default: // group options that show the help
          {
             switch(c)
@@ -142,6 +146,64 @@ bool parse_startup_options(int argc, char** argv, StartupOptions* result)
    return !error;
 }
 
+int debug_main(const StartupOptions* startup_options)
+{
+   StartupOptions options_server, options_client;
+   CLEAR(options_server);
+   CLEAR(options_client);
+
+   // use the same MTU for full compatibility
+   options_server.mtu = startup_options->mtu;
+   options_client.mtu = options_server.mtu;
+
+   // setup two compatible peers to run side-by-side locally
+   Peer* client = peer_create(options_server.mtu);
+   Peer* server = peer_create(options_client.mtu);
+   if (!client ||  !server)
+   return -1;
+
+   options_server.mode = VPNMode_Server;
+   options_client.mode = VPNMode_Client;
+
+   // hardcode the interfaces to something meaningful
+   strncpy(options_server.interface, "ddgs", IF_NAMESIZE-1);
+   strncpy(options_client.interface, "ddgc", IF_NAMESIZE-1);
+
+   // use different blocks to avoid conflicts (default network mask)
+   parse_network_address("10.9.7.0", &options_server.tunnel_address);
+   parse_network_address("10.9.6.0", &options_client.tunnel_address);
+
+   // connect them through localhost
+   parse_network_address("127.0.0.1", &options_server.address);
+   parse_network_address("127.0.0.1", &options_client.address);
+
+   assign_address_port(&options_server.address, SERVICE_PORT);
+   assign_address_port(&options_client.address, SERVICE_PORT);
+
+   if (!peer_initialize(server, &options_server))
+      return -1;
+   
+   if (!peer_initialize(client, &options_client))
+      return -1;
+
+   printf("server peer ready using interface %s\n", server->tunnel.if_name);
+   printf("client peer ready using interface %s\n", client->tunnel.if_name);
+
+   if (!peer_connect(client, &options_client.address))
+      return -1;
+
+   tunnel_up(&server->tunnel);
+   tunnel_up(&client->tunnel);
+
+   while(true)
+   {
+      peer_service_client(server);
+      peer_service_client(client);
+   }
+
+   return 0;
+}
+
 int main(int argc, char** argv)
 {
    if (!check_tun_privileges() || !check_socket_privileges())
@@ -159,6 +221,10 @@ int main(int argc, char** argv)
       show_help(argv[0]);
       return 0;
    }
+
+   // divert execution to testing mode
+   if (startup_options.debug_mode)
+      return debug_main(&startup_options);
 
    // assign the service port to the selected address
    assign_address_port(&startup_options.address, SERVICE_PORT);
