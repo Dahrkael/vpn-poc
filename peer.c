@@ -1,41 +1,4 @@
-#include "common.h"
-
-// peer represents one endpoint of a VPN connection (both client or server)
-// combines a network connection to another peer and a local tunnel device
-
-// remote peer keeps the local state associated with other non-local peers
-
-#define DEFAULT_BUFFER_SIZE 1400
-
-typedef enum {
-    PS_Disconnected = 0,
-    PS_Handshaking,
-    PS_Connected
-} PeerState;
-
-struct remote_peer_t;
-typedef struct remote_peer_t RemotePeer;
-
-struct remote_peer_t {
-    uint8_t id;
-    PeerState state;
-    struct sockaddr_storage address;
-
-    // linked list members
-    RemotePeer* prev;
-    RemotePeer* next;
-};
-
-typedef struct {
-    VPNMode mode;
-    Tunnel tunnel;
-    Socket socket;
-
-    uint32_t buffer_size;
-    uint8_t* recv_buffer;
-    uint8_t* send_buffer;
-    RemotePeer* remote_peers;
-} Peer;
+#include "peer.h"
 
 RemotePeer* remotepeer_create()
 {
@@ -70,7 +33,10 @@ Peer* peer_create(const uint32_t buffer_size)
     memset(peer, 0, sizeof(Peer));
     socket_clear(&peer->socket);
 
+    // include the header size to compose messages directly in the buffers
     peer->buffer_size = buffer_size > 0 ? buffer_size : DEFAULT_BUFFER_SIZE;
+    peer->buffer_size += sizeof(MsgHeader);
+
     peer->recv_buffer = (uint8_t*)malloc(peer->buffer_size);
     peer->send_buffer = (uint8_t*)malloc(peer->buffer_size);
     if (!peer->recv_buffer || !peer->send_buffer)
@@ -134,7 +100,8 @@ bool peer_initialize2(Peer* peer, const VPNMode mode, const struct sockaddr_stor
     if (!tunnel_open(&peer->tunnel, interface ))
         return false;
 
-    tunnel_set_mtu(&peer->tunnel, peer->buffer_size);
+    // set the tunnel mtu to just enough for the payload with no headers
+    tunnel_set_mtu(&peer->tunnel, protocol_max_payload(peer));
 
     return true;
 }
@@ -216,41 +183,62 @@ bool peer_connect(Peer* peer, const struct sockaddr_storage* address)
     return true;
 }
 
+bool peer_enable(Peer* peer, const bool enabled)
+{
+    if (!peer || !tunnel_is_valid(&peer->tunnel))
+        return false;
+
+    return enabled ? tunnel_up(&peer->tunnel) : tunnel_down(&peer->tunnel);
+}
+
 bool peer_service_client(Peer* peer)
 {
     do {
-        // read incoming data from the socket
+        // read incoming message from the socket
         struct sockaddr_storage remote;
         uint32_t read = peer->buffer_size;
         SocketResult ret = socket_receive(&peer->socket, peer->recv_buffer, &read, &remote);
+
         if (ret == SR_Error)
             return false;
+
         if (ret == SR_Pending)
             break; // no more data to read
+
         if (ret == SR_Success)
         {
-            printf_debug("socket received %u bytes\n", read);
-            if (!tunnel_write(&peer->tunnel, peer->recv_buffer, read))
-                return false;
+            bool ok = true;
+            MsgType type = protocol_get_type(peer->recv_buffer, read);
+            switch(type)
+            {
+                case MT_ServerHandshake:
+                    ok = protocol_handshake_server(peer, peer->remote_peers);
+                break;
+                case MT_Reconnect:
+                    ok = protocol_reconnect_server(peer, peer->remote_peers, read);
+                break;
+                case MT_Data:
+                    protocol_data_receive(peer, peer->remote_peers, read); // non-fatal
+                break;
+                default:
+                    printf("%s: invalid message received\n", __func__);
+                    continue; // non-fatal, continue reading
+            }
+
+            if (!ok) return false;
         }
     } while(true);
 
     do {
         // read outgoing data from the tunnel
-        uint32_t read = peer->buffer_size;
+        uint32_t read = protocol_max_payload(peer);
         if (!tunnel_read(&peer->tunnel, peer->send_buffer, &read))
             break; // no more data to read
+
         // send tunnel data through the socket
-        if (read > 0)
-        {
-            printf_debug("tunnel received %u bytes\n", read);
-            uint32_t sent = read;
-            if (!socket_send(&peer->socket, peer->send_buffer, &sent, &peer->remote_peers->address))
-                return false;
-            assert(read == sent);
-        }
+         if (!protocol_data_send(peer, peer->remote_peers, read))
+            return false;    
     } while(true);
-    
     
     return true;
 }

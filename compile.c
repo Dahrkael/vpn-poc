@@ -5,5 +5,6 @@
 
 #include "tunnel.c"
 #include "socket.c"
+#include "protocol.c"
 #include "peer.c"
 #include "main.c"

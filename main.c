@@ -192,8 +192,8 @@ int debug_main(const StartupOptions* startup_options)
    if (!peer_connect(client, &options_client.address))
       return -1;
 
-   tunnel_up(&server->tunnel);
-   tunnel_up(&client->tunnel);
+   peer_enable(server, true);
+   peer_enable(client, true);
 
    while(true)
    {
