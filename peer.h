@@ -26,6 +26,8 @@ struct remote_peer_t {
     PeerState state;
     uint64_t secret; // for reconnection
     struct sockaddr_storage address;
+    uint32_t rtt;
+    // TODO last recv time
 
     // encryption stuff (placeholder)
     void* cipher;
@@ -53,16 +55,25 @@ typedef struct {
 
 typedef enum {
     MT_Invalid = 0,
-    MT_ClientHandshake = 1,
+    MT_Ping,
+    MT_Pong,
+    MT_ClientHandshake,
     MT_ServerHandshake,
     MT_Reconnect,
-    MT_Data = 5
+    MT_Data
 } MsgType;
 
 typedef struct {
     MsgType type;
     uint32_t checksum; // TODO crc32
 } MsgHeader;
+
+// ping acts like a keep-alive
+typedef struct {
+    MsgHeader header;
+    uint64_t send_time;
+    uint64_t recv_time;
+} MsgPing;
 
 typedef struct {
     MsgHeader header;

@@ -209,13 +209,21 @@ bool peer_service_client(Peer* peer)
         {
             bool ok = true;
             MsgType type = protocol_get_type(peer->recv_buffer, read);
+
+            if (read < protocol_get_message_size(type))
+                return true; // non-fatal, just ignore the message
+
             switch(type)
             {
+                case MT_Ping:
+                case MT_Pong:
+                    ok = protocol_ping(peer, peer->remote_peers);
+                    break;
                 case MT_ServerHandshake:
                     ok = protocol_handshake_server(peer, peer->remote_peers);
                 break;
                 case MT_Reconnect:
-                    ok = protocol_reconnect_server(peer, peer->remote_peers, read);
+                    ok = protocol_reconnect_server(peer, peer->remote_peers);
                 break;
                 case MT_Data:
                     protocol_data_receive(peer, peer->remote_peers, read); // non-fatal

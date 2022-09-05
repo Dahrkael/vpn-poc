@@ -12,6 +12,26 @@ MsgType protocol_get_type(const uint8_t* buffer, const uint32_t length)
     return type;
 }
 
+uint32_t protocol_get_message_size(const MsgType type)
+{
+    switch(type)
+    {
+        case MT_Invalid: 
+            return 0;
+        case MT_Ping:
+        case MT_Pong:
+            return sizeof(MsgPing);
+        case MT_Reconnect: 
+            return sizeof(MsgReconnect);
+        case MT_ClientHandshake: 
+        case MT_ServerHandshake:
+            return sizeof(MsgHandshake);
+        case MT_Data: 
+            return sizeof(MsgHeader) + 1; // variable size
+    }
+    return 0;
+}
+
 uint32_t protocol_max_payload(Peer* peer)
 {
     assert(peer);
@@ -62,6 +82,30 @@ bool protocol_handshake_server(Peer* peer, RemotePeer* remote)
     return true;
 }
 
+bool protocol_ping(Peer* peer, RemotePeer* remote)
+{
+    MsgPing* request = (MsgPing*)peer->recv_buffer;
+
+    if (request->header.type == MT_Pong)
+    {
+        //remote->rtt = now - request->send_time; TODO
+        return true;
+    }
+
+    assert(request->header.type == MT_Ping);
+    // could just memcpy the request
+    MsgPing* response = (MsgPing*)peer->send_buffer;
+    response->header.type = MT_Pong;
+    response->send_time = request->send_time;
+    //response->recv_time = now;
+
+    uint32_t sent = sizeof(MsgPing);
+    if (!socket_send(&peer->socket, peer->send_buffer, &sent, &remote->address))
+        return false;
+
+    return sent == sizeof(MsgPing);
+}
+
 // message originating on both client and server
 bool protocol_reconnect_request(Peer* peer, RemotePeer* remote)
 {
@@ -79,11 +123,8 @@ bool protocol_reconnect_request(Peer* peer, RemotePeer* remote)
 }
 
 // client message received on the server
-bool protocol_reconnect_client(Peer* peer, struct sockaddr_storage* remote, const uint32_t length)
+bool protocol_reconnect_client(Peer* peer, struct sockaddr_storage* remote)
 {
-    if (length < sizeof(MsgReconnect))
-        return false;
-
     MsgReconnect* message = (MsgReconnect*)peer->recv_buffer;
 
     // find a matching peer entry to update its address
@@ -109,11 +150,8 @@ bool protocol_reconnect_client(Peer* peer, struct sockaddr_storage* remote, cons
 }
 
 // server message received on the client
-bool protocol_reconnect_server(Peer* peer, RemotePeer* remote, const uint32_t length)
+bool protocol_reconnect_server(Peer* peer, RemotePeer* remote)
 {
-    if (length < sizeof(MsgReconnect))
-        return false;
-
     MsgReconnect* message = (MsgReconnect*)peer->recv_buffer;
     // set the id if not set yet
     if (remote->id == 0)
@@ -150,9 +188,6 @@ bool protocol_data_send(Peer* peer, RemotePeer* remote, const uint32_t length)
 
 bool protocol_data_receive(Peer* peer, RemotePeer* remote, const uint32_t length)
 {
-    if (length == 0)
-        return false;
-
     // skip the header at the beginning of the buffer
     const uint8_t* data = peer->send_buffer + sizeof(MsgHeader);
     const uint32_t data_length = length - sizeof(MsgHeader);
