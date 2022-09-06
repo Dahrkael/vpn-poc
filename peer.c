@@ -290,11 +290,13 @@ bool peer_service(Peer* peer)
         if (!tunnel_read(&peer->tunnel, buffer, &read))
             break; // no more data to read
 
-        printf_debug("%s: received %u bytes from tunnel\n", __func__, read);
+        // blackhole the tunnel data if there are not remote peers available
+        if (!peer->remote_peers)
+            continue;
 
         // send tunnel data through the socket
         peer->send_length = read;
-         if (!protocol_data_send(peer, peer->remote_peers))
+        if (!protocol_data_send(peer, peer->remote_peers))
             return false;    
     } while(true);
     
