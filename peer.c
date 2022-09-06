@@ -10,18 +10,33 @@ RemotePeer* remotepeer_create()
     return peer;
 }
 
-void remotepeer_destroy(RemotePeer* peer)
+// returns the next remote peer in the intrusive list
+RemotePeer* remotepeer_destroy(RemotePeer* peer)
 {
     if (!peer)
-        return;
+        return NULL;
+
+#if DEBUG
+    char text[256];
+    address_to_string(&peer->address, text, sizeof(text));
+    printf_debug("%s: peer address %s\n", __func__, text);
+#endif
 
     // remove the peer from the list
     if (peer->prev)
+    {
         peer->prev->next = peer->next;
+        peer->next->prev = peer->prev;
+    }
+
+    // return the next one to update the list head if needed
+    RemotePeer* next = peer->next;
 
     // delete the peer
     free(peer);
     peer = NULL;
+
+    return next;
 }
 
 Peer* peer_create(const uint32_t buffer_size)
@@ -191,6 +206,8 @@ bool peer_connect(Peer* peer, const struct sockaddr_storage* address)
 
     remote_peer->state = PS_Handshaking;
     remote_peer->address = *address;
+    remote_peer->last_recv_time = get_current_timestamp();
+    assert(remote_peer->last_recv_time != 0);
 
     // first and only remote peer in the client list
     peer->remote_peers = remote_peer;
@@ -205,10 +222,44 @@ bool peer_enable(Peer* peer, const bool enabled)
     return enabled ? tunnel_up(&peer->tunnel) : tunnel_down(&peer->tunnel);
 }
 
+void peer_check_connections(Peer* peer)
+{
+    const uint64_t now = get_current_timestamp();
+    RemotePeer* remote = peer->remote_peers;
+    while(remote)
+    {
+        const uint64_t elapsed = now - remote->last_recv_time;
+
+        // remove remote peers flagged for disconnection
+        if (remote->state == PS_Disconnected)
+        {
+            remote = remotepeer_destroy(remote);
+        }
+        // remove all the remote peers that stay silent too long
+        else if (elapsed > DEFAULT_CONNECTION_TIMEOUT)
+        {
+            protocol_disconnect_request(peer, remote);
+            remote = remotepeer_destroy(remote);
+        }
+        else
+        {
+            // use pings to keep alive the connection (from clients only)
+            if (peer->mode == VPNMode_Client && elapsed > DEFAULT_KEEPALIVE_TIMEOUT)
+            {
+                //protocol_ping_request(peer, remote);
+            }
+
+            remote = remote->next;
+        }
+    }
+}
+
 bool peer_service(Peer* peer)
 {
     if (!peer)
         return false;
+
+    peer_check_connections(peer);
 
     if (peer->mode == VPNMode_Client)
     {
@@ -243,7 +294,7 @@ bool peer_service(Peer* peer)
             MsgType type = protocol_read_type(peer->recv_buffer, peer->recv_length);
             if (peer->recv_length < protocol_get_message_size(type))
                 continue; // non-fatal, just ignore the message
-
+           
             bool ok = true;
             if (!remote)
             {
@@ -262,6 +313,12 @@ bool peer_service(Peer* peer)
             }
             else
             {
+#if DEBUG
+            char remote_text[256];
+            address_to_string(&remote->address, remote_text, sizeof(remote_text));
+            printf_debug("%s: received message [%s] from %s\n", __func__, protocol_get_type_text(type), remote_text );
+#endif
+
                 switch(type)
                 {
                 case MT_ServerHandshake:
@@ -281,6 +338,9 @@ bool peer_service(Peer* peer)
                     printf("%s: invalid message [%s] received from known peer\n", __func__, protocol_get_type_text(type));
                     continue; // non-fatal, continue reading
                 }
+
+                // update the last received message timestamp
+                remote->last_recv_time = get_current_timestamp();
             }
 
             // clear buffer after processing for privacy

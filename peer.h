@@ -8,6 +8,8 @@
 // remote peer keeps the local state associated with other non-local peers
 
 #define DEFAULT_BUFFER_SIZE 1400
+#define DEFAULT_KEEPALIVE_TIMEOUT (2 * 1000)
+#define DEFAULT_CONNECTION_TIMEOUT (10 * 1000)
 
 /* remote peer data */
 
@@ -27,7 +29,7 @@ struct remote_peer_t {
     uint64_t secret; // for reconnection
     struct sockaddr_storage address;
     uint32_t rtt;
-    // TODO last recv time
+    uint64_t last_recv_time;
 
     // encryption stuff (placeholder)
     void* cipher;

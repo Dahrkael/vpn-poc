@@ -225,6 +225,7 @@ bool protocol_handshake_client(Peer* peer, struct sockaddr_storage* remote)
 
     new_peer->state = PS_Connected;
     new_peer->address = *remote;
+    new_peer->last_recv_time = get_current_timestamp();
     //new_peer->cipher = ;
     //new_peer->key = ;
 
@@ -263,25 +264,76 @@ bool protocol_handshake_server(Peer* peer, RemotePeer* remote)
     return true;
 }
 
+bool protocol_ping_request(Peer* peer, RemotePeer* remote)
+{
+#if DEBUG
+    char remote_text[256];
+    address_to_string(&remote->address, remote_text, sizeof(remote_text));
+    printf_debug("%s: keep-alive to %s after %lums\n", __func__, remote_text, 
+        get_current_timestamp() - remote->last_recv_time);
+#endif
+
+    MsgPing* message = (MsgPing*)peer->send_buffer;
+    message->send_time = get_current_timestamp();
+    message->recv_time = 0;
+
+    peer->send_length = sizeof(MsgPing);
+    return protocol_send(peer, remote, MT_Ping);
+}
+
 bool protocol_ping(Peer* peer, RemotePeer* remote)
 {
     MsgPing* request = (MsgPing*)peer->recv_buffer;
 
     if (request->header.type == MT_Pong)
     {
-        //remote->rtt = now - request->send_time; TODO
+        remote->rtt = get_current_timestamp() - request->send_time;
         return true;
     }
 
     assert(request->header.type == MT_Ping);
+
+#if DEBUG
+    char remote_text[256];
+    address_to_string(&remote->address, remote_text, sizeof(remote_text));
+    printf_debug("%s: keep-alive from %s\n", __func__, remote_text);
+#endif
     
     // could just memcpy the request
     MsgPing* response = (MsgPing*)peer->send_buffer;
     response->send_time = request->send_time;
-    //response->recv_time = now;
+    response->recv_time = get_current_timestamp();
 
     peer->send_length = sizeof(MsgPing);
     return protocol_send(peer, remote, MT_Pong);
+}
+
+// message originating on both client and server
+bool protocol_disconnect_request(Peer* peer, RemotePeer* remote)
+{
+    // mark as disconnected and remove it in peer_check_connections()
+    remote->state = PS_Disconnected;
+
+    MsgDisconnect* message = (MsgDisconnect*)peer->send_buffer;
+    message->reason = 1; // placeholder
+
+    peer->send_length = sizeof(MsgDisconnect);
+    return protocol_send(peer, remote, MT_Disconnect);
+}
+
+//  message received on both client and server
+bool protocol_disconnect(Peer* peer, RemotePeer* remote)
+{
+    MsgDisconnect* message = (MsgDisconnect*)peer->recv_buffer;
+
+    char remote_text[256];
+    address_to_string(&remote->address, remote_text, sizeof(remote_text));
+    printf("disconnection (reason %u) from %s\n", message->reason, remote_text);
+
+    // mark as disconnected and remove it in peer_check_connections()
+    remote->state = PS_Disconnected;
+
+    return true;
 }
 
 // message originating on both client and server
