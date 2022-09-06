@@ -273,7 +273,10 @@ bool peer_service(Peer* peer)
                     continue; // non-fatal, continue reading
                 }
             }
-            
+
+            // clear buffer after processing for privacy
+            memset(peer->recv_buffer, 0, peer->buffer_size);
+            peer->recv_length = 0;
 
             if (!ok) return false;
         }
@@ -287,7 +290,10 @@ bool peer_service(Peer* peer)
         if (!tunnel_read(&peer->tunnel, buffer, &read))
             break; // no more data to read
 
+        printf_debug("%s: received %u bytes from tunnel\n", __func__, read);
+
         // send tunnel data through the socket
+        peer->send_length = read;
          if (!protocol_data_send(peer, peer->remote_peers))
             return false;    
     } while(true);

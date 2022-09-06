@@ -189,11 +189,11 @@ int debug_main(const StartupOptions* startup_options)
    printf("server peer ready using interface %s\n", server->tunnel.if_name);
    printf("client peer ready using interface %s\n", client->tunnel.if_name);
 
-   if (!peer_connect(client, &options_client.address))
-      return -1;
-
    peer_enable(server, true);
    peer_enable(client, true);
+
+   if (!peer_connect(client, &options_client.address))
+      return -1;  
 
    while(true)
    {

@@ -92,7 +92,7 @@ bool protocol_send(Peer* peer, RemotePeer* remote, const MsgType type)
     memset(header, 0, sizeof(MsgHeader));
     header->type = type;
     // compute the checksum of the buffer *after* the checksum field
-    header->checksum = protocol_compute_checksum(peer->send_buffer + sizeof(uint32_t), peer->send_length);
+    header->checksum = protocol_compute_checksum(peer->send_buffer + sizeof(uint32_t), peer->send_length - sizeof(uint32_t));
 
     // first compress to get better ratio
     bool ok = protocol_compress(peer, peer->send_buffer, &peer->send_length);
@@ -110,6 +110,7 @@ bool protocol_send(Peer* peer, RemotePeer* remote, const MsgType type)
 
     // clear buffer after sending for privacy
     memset(peer->send_buffer, 0, peer->buffer_size);
+    peer->send_length = 0;
 
     return true;
 }
@@ -137,8 +138,9 @@ SocketResult protocol_receive(Peer* peer, RemotePeer** remote, struct sockaddr_s
         bool valid = false;
         if (uncompressed)
         {
-            uint32_t checksum = protocol_compute_checksum(peer->recv_buffer + sizeof(uint32_t), peer->recv_length);
-            valid = checksum == ((MsgHeader*)peer->recv_buffer)->checksum;
+            uint32_t computed = protocol_compute_checksum(peer->recv_buffer + sizeof(uint32_t), peer->recv_length - sizeof(uint32_t));
+            uint32_t incoming = ((MsgHeader*)peer->recv_buffer)->checksum;
+            valid = (computed == incoming);
         }
 
         if (!decrypted || !uncompressed || !valid)
@@ -149,6 +151,7 @@ SocketResult protocol_receive(Peer* peer, RemotePeer** remote, struct sockaddr_s
                 printf("%s: checksum failed in message from %s\n", __func__, address_text);
             else
                 printf("%s: failed to %s message from %s\n", __func__, decrypted ? "uncompress" : "decrypt", address_text);
+
             peer->recv_length = 0; // length zero because theres no available data
         }
     }   
