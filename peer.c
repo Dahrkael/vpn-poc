@@ -87,9 +87,9 @@ RemotePeer* peer_find_remote(Peer* peer, struct sockaddr_storage* address)
     RemotePeer* remote = peer->remote_peers;
     while(remote)
     {
-        bool same = !memcmp(&remote->address, address, sizeof(struct sockaddr_storage));
-        if (same)
+        if (address_equal(&remote->address, address))
             return remote;
+        remote = remote->next;
     }
 
     return NULL;
@@ -210,6 +210,15 @@ bool peer_service(Peer* peer)
     if (!peer)
         return false;
 
+    if (peer->mode == VPNMode_Client)
+    {
+        if (peer->remote_peers && peer->remote_peers->state == PS_Handshaking)
+        {
+            if (!protocol_handshake_request(peer, peer->remote_peers))
+                return false;
+        }
+    }
+
     do {
         // read messages from known and unknown peers
         RemotePeer* remote = NULL;
@@ -231,7 +240,7 @@ bool peer_service(Peer* peer)
             if (peer->recv_length == 0)
                 continue;
 
-            MsgType type = protocol_get_type(peer->recv_buffer, peer->recv_length);
+            MsgType type = protocol_read_type(peer->recv_buffer, peer->recv_length);
             if (peer->recv_length < protocol_get_message_size(type))
                 continue; // non-fatal, just ignore the message
 
@@ -247,7 +256,7 @@ bool peer_service(Peer* peer)
                     ok = protocol_reconnect_client(peer, &new_remote);
                     break;
                 default:
-                    printf("%s: invalid message received from unknown peer\n", __func__);
+                    printf("%s: invalid message [%s] received from unknown peer\n", __func__, protocol_get_type_text(type));
                     continue; // non-fatal, continue reading
                 }
             }
@@ -269,7 +278,7 @@ bool peer_service(Peer* peer)
                     ok = protocol_ping(peer, remote);
                     break;
                 default:
-                    printf("%s: invalid message received from known peer\n", __func__);
+                    printf("%s: invalid message [%s] received from known peer\n", __func__, protocol_get_type_text(type));
                     continue; // non-fatal, continue reading
                 }
             }
@@ -292,6 +301,10 @@ bool peer_service(Peer* peer)
 
         // blackhole the tunnel data if there are not remote peers available
         if (!peer->remote_peers)
+            continue;
+
+        // don't send data if the connection is not fully established
+        if (peer->remote_peers->state != PS_Connected)
             continue;
 
         // send tunnel data through the socket

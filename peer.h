@@ -53,6 +53,7 @@ typedef struct {
     RemotePeer* remote_peers;
 } Peer;
 
+RemotePeer* remotepeer_create();
 RemotePeer* peer_find_remote(Peer* peer, struct sockaddr_storage* address);
 
 /* protocol data */
@@ -65,6 +66,7 @@ typedef enum {
     MT_ServerHandshake,
     MT_ClientReconnect,
     MT_ServerReconnect,
+    MT_Disconnect,
     MT_Data
 } MsgType;
 
@@ -82,6 +84,8 @@ typedef struct {
 
 typedef struct {
     MsgHeader header;
+    uint32_t protocol;
+    uint8_t version;
     uint8_t preferred_cipher;
     uint8_t cipher_count;
     uint32_t ciphers[8];
@@ -92,3 +96,8 @@ typedef struct {
     uint8_t id;
     uint64_t secret;
 } MsgReconnect;
+
+typedef struct {
+    MsgHeader header;
+    uint8_t reason;
+} MsgDisconnect;

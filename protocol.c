@@ -1,6 +1,9 @@
 #include "peer.h"
 
-MsgType protocol_get_type(const uint8_t* buffer, const uint32_t length)
+#define PROTOCOL_ID 0xBEEFCAFE
+#define PROTOCOL_VERSION 0x1
+
+MsgType protocol_read_type(const uint8_t* buffer, const uint32_t length)
 {
     if (length < sizeof(MsgHeader))
         return MT_Invalid;
@@ -10,6 +13,23 @@ MsgType protocol_get_type(const uint8_t* buffer, const uint32_t length)
         return MT_Invalid;
 
     return type;
+}
+
+const char* protocol_get_type_text(MsgType type)
+{
+    switch(type)
+    {
+        case MT_Ping: return "Ping";
+        case MT_Pong: return "Pong";
+        case MT_ClientHandshake: return "Client Handshake";
+        case MT_ServerHandshake: return "Server Handshake";
+        case MT_ClientReconnect: return "Client Reconnect";
+        case MT_ServerReconnect: return "Server Reconnect";
+        case MT_Data: return "Data";
+        case MT_Disconnect: return "Disconnect";
+        case MT_Invalid: return "Invalid";
+    }
+    return "<Invalid>";
 }
 
 uint32_t protocol_get_message_size(const MsgType type)
@@ -29,6 +49,8 @@ uint32_t protocol_get_message_size(const MsgType type)
             return sizeof(MsgHandshake);
         case MT_Data: 
             return sizeof(MsgHeader) + 1; // variable size
+        case MT_Disconnect:
+            return sizeof(MsgDisconnect);
     }
     return 0;
 }
@@ -159,17 +181,85 @@ SocketResult protocol_receive(Peer* peer, RemotePeer** remote, struct sockaddr_s
     return ret;
 }
 
+// message originating on both client and server
+bool protocol_handshake_request(Peer* peer, RemotePeer* remote)
+{
+    printf_debug("%s: %s id %08X version %u\n", __func__, 
+        peer->mode == VPNMode_Server ? "SERVER" : "CLIENT", PROTOCOL_ID, PROTOCOL_VERSION);
+
+    MsgHandshake* message = (MsgHandshake*)peer->send_buffer;
+    message->protocol = PROTOCOL_ID;
+    message->version = PROTOCOL_VERSION;
+    // pure placeholder for illustration purposes
+    message->preferred_cipher = 1;
+    message->cipher_count = 2;
+    message->ciphers[0] = 0xAE5128; // these would be FNV-1a hashes
+    message->ciphers[1] = 0xAE5256;
+
+    peer->send_length = sizeof(MsgHandshake);
+    MsgType type = (peer->mode == VPNMode_Server ? MT_ServerHandshake : MT_ClientHandshake);
+    return protocol_send(peer, remote, type);
+}
+
 // client message received on the server
 bool protocol_handshake_client(Peer* peer, struct sockaddr_storage* remote)
 {
-    // TODO
-    return true;
+    char remote_text[256];
+    address_to_string(remote, remote_text, sizeof(remote_text));
+    printf_debug("%s: new connection from %s\n", __func__, remote_text);
+
+    MsgHandshake* message = (MsgHandshake*)peer->recv_buffer;
+
+    // protocol and version have to match
+    if (message->protocol != PROTOCOL_ID)
+        return true;
+    if (message->version != PROTOCOL_VERSION)
+        return true;
+
+     // create a remote peer representing the new client
+    RemotePeer* new_peer = remotepeer_create();
+    assert(new_peer);
+
+    new_peer->id = /*TODO*/99;
+    new_peer->secret = rand();
+
+    new_peer->state = PS_Connected;
+    new_peer->address = *remote;
+    //new_peer->cipher = ;
+    //new_peer->key = ;
+
+    // place it at the end of the list
+    RemotePeer* last = peer->remote_peers;
+    if (!last)
+        peer->remote_peers = new_peer;
+    else
+    {
+        while(last && last->next)
+            last++;
+        last->next = new_peer;
+    }
+
+    printf_debug("%s: peer accepted from %s\n", __func__, remote_text);
+
+    // send handshake answer
+    return protocol_handshake_request(peer, new_peer);
 }
 
 // server message received on the client
 bool protocol_handshake_server(Peer* peer, RemotePeer* remote)
 {
-    // TODO
+     MsgHandshake* message = (MsgHandshake*)peer->recv_buffer;
+
+    // protocol and version have to match
+    if (message->protocol != PROTOCOL_ID)
+        return false;
+    if (message->version != PROTOCOL_VERSION)
+        return false;
+
+    printf_debug("%s: handshake successful\n", __func__);
+
+    // now it can start forwawrding packets
+    remote->state = PS_Connected;
     return true;
 }
 
@@ -190,6 +280,7 @@ bool protocol_ping(Peer* peer, RemotePeer* remote)
     response->send_time = request->send_time;
     //response->recv_time = now;
 
+    peer->send_length = sizeof(MsgPing);
     return protocol_send(peer, remote, MT_Pong);
 }
 
@@ -200,7 +291,8 @@ bool protocol_reconnect_request(Peer* peer, RemotePeer* remote)
     message->id = remote->id;
     message->secret = remote->secret;
 
-    MsgType type = peer->mode == VPNMode_Server ? MT_ServerReconnect : MT_ClientReconnect;
+    peer->send_length = sizeof(MsgReconnect);
+    MsgType type = (peer->mode == VPNMode_Server ? MT_ServerReconnect : MT_ClientReconnect);
     return protocol_send(peer, remote, type);
 }
 
