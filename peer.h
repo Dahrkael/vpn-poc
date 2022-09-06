@@ -47,9 +47,13 @@ typedef struct {
 
     uint32_t buffer_size;
     uint8_t* recv_buffer;
+    uint32_t recv_length;
     uint8_t* send_buffer;
+    uint32_t send_length;
     RemotePeer* remote_peers;
 } Peer;
+
+RemotePeer* peer_find_remote(Peer* peer, struct sockaddr_storage* address);
 
 /* protocol data */
 
@@ -59,13 +63,14 @@ typedef enum {
     MT_Pong,
     MT_ClientHandshake,
     MT_ServerHandshake,
-    MT_Reconnect,
+    MT_ClientReconnect,
+    MT_ServerReconnect,
     MT_Data
 } MsgType;
 
 typedef struct {
+    uint32_t checksum;
     MsgType type;
-    uint32_t checksum; // TODO crc32
 } MsgHeader;
 
 // ping acts like a keep-alive

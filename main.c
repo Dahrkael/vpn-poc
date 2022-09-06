@@ -197,8 +197,8 @@ int debug_main(const StartupOptions* startup_options)
 
    while(true)
    {
-      peer_service_client(server);
-      peer_service_client(client);
+      peer_service(server);
+      peer_service(client);
    }
 
    return 0;

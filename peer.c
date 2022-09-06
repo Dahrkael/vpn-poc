@@ -81,6 +81,20 @@ void peer_destroy(Peer* peer)
     peer = NULL;
 }
 
+RemotePeer* peer_find_remote(Peer* peer, struct sockaddr_storage* address)
+{
+    // this should be a hashmap lookup or a binary search
+    RemotePeer* remote = peer->remote_peers;
+    while(remote)
+    {
+        bool same = !memcmp(&remote->address, address, sizeof(struct sockaddr_storage));
+        if (same)
+            return remote;
+    }
+
+    return NULL;
+}
+
 bool peer_initialize2(Peer* peer, const VPNMode mode, const struct sockaddr_storage* address, const char* interface)
 {
     if (!peer)
@@ -191,13 +205,16 @@ bool peer_enable(Peer* peer, const bool enabled)
     return enabled ? tunnel_up(&peer->tunnel) : tunnel_down(&peer->tunnel);
 }
 
-bool peer_service_client(Peer* peer)
+bool peer_service(Peer* peer)
 {
+    if (!peer)
+        return false;
+
     do {
-        // read incoming message from the socket
-        struct sockaddr_storage remote;
-        uint32_t read = peer->buffer_size;
-        SocketResult ret = socket_receive(&peer->socket, peer->recv_buffer, &read, &remote);
+        // read messages from known and unknown peers
+        RemotePeer* remote = NULL;
+        struct sockaddr_storage new_remote;
+        SocketResult ret = protocol_receive(peer, &remote, &new_remote);
 
         if (ret == SR_Error)
             return false;
@@ -207,31 +224,56 @@ bool peer_service_client(Peer* peer)
 
         if (ret == SR_Success)
         {
+            // clients cannot receive messages from unknown sources
+            assert(remote || peer->mode == VPNMode_Server);
+
+            // this means unpacking the message failed
+            if (peer->recv_length == 0)
+                continue;
+
+            MsgType type = protocol_get_type(peer->recv_buffer, peer->recv_length);
+            if (peer->recv_length < protocol_get_message_size(type))
+                continue; // non-fatal, just ignore the message
+
             bool ok = true;
-            MsgType type = protocol_get_type(peer->recv_buffer, read);
-
-            if (read < protocol_get_message_size(type))
-                return true; // non-fatal, just ignore the message
-
-            switch(type)
+            if (!remote)
             {
+                switch(type)
+                {
+                case MT_ClientHandshake:
+                    ok = protocol_handshake_client(peer, &new_remote);
+                    break;
+                case MT_ClientReconnect:
+                    ok = protocol_reconnect_client(peer, &new_remote);
+                    break;
+                default:
+                    printf("%s: invalid message received from unknown peer\n", __func__);
+                    continue; // non-fatal, continue reading
+                }
+            }
+            else
+            {
+                switch(type)
+                {
+                case MT_ServerHandshake:
+                    ok = protocol_handshake_server(peer, remote);
+                    break;
+                case MT_ServerReconnect:
+                    ok = protocol_reconnect_server(peer, remote);
+                    break;
+                case MT_Data:
+                    protocol_data_receive(peer, remote); // non-fatal
+                    break;
                 case MT_Ping:
                 case MT_Pong:
-                    ok = protocol_ping(peer, peer->remote_peers);
+                    ok = protocol_ping(peer, remote);
                     break;
-                case MT_ServerHandshake:
-                    ok = protocol_handshake_server(peer, peer->remote_peers);
-                break;
-                case MT_Reconnect:
-                    ok = protocol_reconnect_server(peer, peer->remote_peers);
-                break;
-                case MT_Data:
-                    protocol_data_receive(peer, peer->remote_peers, read); // non-fatal
-                break;
                 default:
-                    printf("%s: invalid message received\n", __func__);
+                    printf("%s: invalid message received from known peer\n", __func__);
                     continue; // non-fatal, continue reading
+                }
             }
+            
 
             if (!ok) return false;
         }
@@ -240,32 +282,15 @@ bool peer_service_client(Peer* peer)
     do {
         // read outgoing data from the tunnel
         uint32_t read = protocol_max_payload(peer);
-        if (!tunnel_read(&peer->tunnel, peer->send_buffer, &read))
+        // leave room for the header
+        uint8_t* buffer = peer->send_buffer + sizeof(MsgHeader);
+        if (!tunnel_read(&peer->tunnel, buffer, &read))
             break; // no more data to read
 
         // send tunnel data through the socket
-         if (!protocol_data_send(peer, peer->remote_peers, read))
+         if (!protocol_data_send(peer, peer->remote_peers))
             return false;    
     } while(true);
     
     return true;
-}
-
-bool peer_service_server(Peer* peer)
-{
-    return true;
-}
-
-bool peer_service(Peer* peer)
-{
-    if (!peer)
-        return false;
-
-    if (peer->mode == VPNMode_Client)
-        return peer_service_client(peer);
-
-    if (peer->mode  == VPNMode_Server)
-        return peer_service_server(peer);
-    
-    return false;
 }
