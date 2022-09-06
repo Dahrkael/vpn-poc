@@ -26,7 +26,8 @@ RemotePeer* remotepeer_destroy(RemotePeer* peer)
     if (peer->prev)
     {
         peer->prev->next = peer->next;
-        peer->next->prev = peer->prev;
+        if (peer->next)
+            peer->next->prev = peer->prev;
     }
 
     // return the next one to update the list head if needed
@@ -34,7 +35,6 @@ RemotePeer* remotepeer_destroy(RemotePeer* peer)
 
     // delete the peer
     free(peer);
-    peer = NULL;
 
     return next;
 }
@@ -85,15 +85,10 @@ void peer_destroy(Peer* peer)
     // delete remote peer list
     RemotePeer* remote_peer = peer->remote_peers;
     while(remote_peer)
-    {
-        RemotePeer* next = remote_peer->next;
-        remotepeer_destroy(remote_peer);
-        remote_peer = next;
-    }
+        remote_peer = remotepeer_destroy(remote_peer);
 
     // delete the peer
     free(peer);
-    peer = NULL;
 }
 
 RemotePeer* peer_find_remote(Peer* peer, struct sockaddr_storage* address)
@@ -233,13 +228,23 @@ void peer_check_connections(Peer* peer)
         // remove remote peers flagged for disconnection
         if (remote->state == PS_Disconnected)
         {
+            printf("removing disconnected peer\n");
+            RemotePeer* old = remote;
             remote = remotepeer_destroy(remote);
+
+            if (old == peer->remote_peers)
+                peer->remote_peers = remote;
         }
         // remove all the remote peers that stay silent too long
         else if (elapsed > DEFAULT_CONNECTION_TIMEOUT)
         {
+            printf("peer timeout\n");
             protocol_disconnect_request(peer, remote);
+            RemotePeer* old = remote;
             remote = remotepeer_destroy(remote);
+
+            if (old == peer->remote_peers)
+                peer->remote_peers = remote;
         }
         else
         {
@@ -316,11 +321,16 @@ bool peer_service(Peer* peer)
 #if DEBUG
             char remote_text[256];
             address_to_string(&remote->address, remote_text, sizeof(remote_text));
-            printf_debug("%s: received message [%s] from %s\n", __func__, protocol_get_type_text(type), remote_text );
+            printf_debug("[%s] %s: received message [%s] from %s\n", 
+                peer->mode == VPNMode_Server ? "server" : "client", 
+                __func__, protocol_get_type_text(type), remote_text );
 #endif
 
                 switch(type)
                 {
+                case MT_Disconnect:
+                    ok = protocol_disconnect(peer, remote);
+                    break;
                 case MT_ServerHandshake:
                     ok = protocol_handshake_server(peer, remote);
                     break;

@@ -182,6 +182,60 @@ SocketResult protocol_receive(Peer* peer, RemotePeer** remote, struct sockaddr_s
 }
 
 // message originating on both client and server
+bool protocol_reconnect_request(Peer* peer, RemotePeer* remote)
+{
+    MsgReconnect* message = (MsgReconnect*)peer->send_buffer;
+    message->id = remote->id;
+    message->secret = remote->secret;
+
+    peer->send_length = sizeof(MsgReconnect);
+    MsgType type = (peer->mode == VPNMode_Server ? MT_ServerReconnect : MT_ClientReconnect);
+    return protocol_send(peer, remote, type);
+}
+
+// client message received on the server
+bool protocol_reconnect_client(Peer* peer, struct sockaddr_storage* remote)
+{
+    MsgReconnect* message = (MsgReconnect*)peer->recv_buffer;
+
+    // find a matching peer entry to update its address
+    bool found = false;
+    RemotePeer* remote_peer = peer->remote_peers;
+    while(remote_peer)
+    {
+        if ((remote_peer->id == message->id) && (remote_peer->secret == message->secret))
+        {
+            remote_peer->address = *remote;
+            remote_peer->secret = rand();
+            found = true;
+            break;
+        }
+        remote_peer = peer->remote_peers->next;
+    }
+
+    // if updated send an acknowledgement
+    if (found)
+        return protocol_reconnect_request(peer, remote_peer);
+
+    return true; // non-fatal server side
+}
+
+// server message received on the client
+bool protocol_reconnect_server(Peer* peer, RemotePeer* remote)
+{
+    MsgReconnect* message = (MsgReconnect*)peer->recv_buffer;
+    // set the id if not set yet
+    if (remote->id == 0)
+        remote->id = message->id;
+
+    // update the secret always
+    if (remote->id == message->id)
+        remote->secret = message->secret;
+
+    return true;
+}
+
+// message originating on both client and server
 bool protocol_handshake_request(Peer* peer, RemotePeer* remote)
 {
     printf_debug("%s: %s id %08X version %u\n", __func__, 
@@ -230,20 +284,29 @@ bool protocol_handshake_client(Peer* peer, struct sockaddr_storage* remote)
     //new_peer->key = ;
 
     // place it at the end of the list
-    RemotePeer* last = peer->remote_peers;
-    if (!last)
+    if (!peer->remote_peers)
+    {
         peer->remote_peers = new_peer;
+    }
     else
     {
+        RemotePeer* last = peer->remote_peers;
         while(last && last->next)
-            last++;
+            last = last->next;
         last->next = new_peer;
     }
 
     printf_debug("%s: peer accepted from %s\n", __func__, remote_text);
 
     // send handshake answer
-    return protocol_handshake_request(peer, new_peer);
+    if (!protocol_handshake_request(peer, new_peer))
+        return false;
+
+    // send reconnect info
+    if (!protocol_reconnect_request(peer, new_peer))
+        return false;
+
+    return true;
 }
 
 // server message received on the client
@@ -332,60 +395,6 @@ bool protocol_disconnect(Peer* peer, RemotePeer* remote)
 
     // mark as disconnected and remove it in peer_check_connections()
     remote->state = PS_Disconnected;
-
-    return true;
-}
-
-// message originating on both client and server
-bool protocol_reconnect_request(Peer* peer, RemotePeer* remote)
-{
-    MsgReconnect* message = (MsgReconnect*)peer->send_buffer;
-    message->id = remote->id;
-    message->secret = remote->secret;
-
-    peer->send_length = sizeof(MsgReconnect);
-    MsgType type = (peer->mode == VPNMode_Server ? MT_ServerReconnect : MT_ClientReconnect);
-    return protocol_send(peer, remote, type);
-}
-
-// client message received on the server
-bool protocol_reconnect_client(Peer* peer, struct sockaddr_storage* remote)
-{
-    MsgReconnect* message = (MsgReconnect*)peer->recv_buffer;
-
-    // find a matching peer entry to update its address
-    bool found = false;
-    RemotePeer* remote_peer = peer->remote_peers;
-    while(remote_peer)
-    {
-        if ((remote_peer->id == message->id) && (remote_peer->secret == message->secret))
-        {
-            remote_peer->address = *remote;
-            remote_peer->secret = rand();
-            found = true;
-            break;
-        }
-        remote_peer = peer->remote_peers->next;
-    }
-
-    // if updated send an acknowledgement
-    if (found)
-        return protocol_reconnect_request(peer, remote_peer);
-
-    return true; // non-fatal server side
-}
-
-// server message received on the client
-bool protocol_reconnect_server(Peer* peer, RemotePeer* remote)
-{
-    MsgReconnect* message = (MsgReconnect*)peer->recv_buffer;
-    // set the id if not set yet
-    if (remote->id == 0)
-        remote->id = message->id;
-
-    // update the secret always
-    if (remote->id == message->id)
-        remote->secret = message->secret;
 
     return true;
 }
