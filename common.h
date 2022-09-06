@@ -9,6 +9,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <time.h>
 #include <unistd.h>
 #include <netdb.h>
 #include <net/if.h>
@@ -41,6 +42,16 @@ void print_errno(const char* prefix, const char* message, int32_t error)
    char buffer[256];
    strerror_r(error, buffer, sizeof(buffer));
    printf("%s: %s [ %s ]\n", prefix, message, buffer);
+}
+
+// current monotonic time in milliseconds
+uint64_t get_current_timestamp()
+{
+   struct timespec spec;
+   if (clock_gettime(CLOCK_MONOTONIC, &spec) == -1)
+      return 0;
+
+   return spec.tv_sec * 1000 + spec.tv_nsec / 1e6;
 }
 
 bool address_equal(struct sockaddr_storage* left, struct sockaddr_storage* right)
