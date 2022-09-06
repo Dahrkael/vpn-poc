@@ -139,6 +139,13 @@ bool socket_connect(Socket* socket, const struct sockaddr_storage* address)
         if (error == EISCONN || error ==  EAGAIN || error == EWOULDBLOCK)
             return true;
 
+        if (error == EFAULT)
+        {
+            char buffer[256];
+            address_to_string(address, buffer, sizeof(buffer));
+            printf("%s: bad address [ %s ]", __func__, buffer);
+        }
+
         if (error == EAFNOSUPPORT)
             printf("%s: tried to connect to an IPv6 using IPv4 or viceversa\n", __func__);
         else
@@ -216,8 +223,17 @@ SocketResult socket_send(Socket* socket, const uint8_t* buffer, uint32_t* length
             return SR_Pending;
 
         print_errno(__func__, "error writing to socket", error);
+
+        if (error == EFAULT)
+        {
+            char text[256];
+            address_to_string(remote, text, sizeof(text));
+            printf("%s: bad address [ %s ]", __func__, text);
+        }
+
         if (error == EMSGSIZE) // this should be recoverable
             return SR_Error;
+
         return SR_Error;
     }
 
