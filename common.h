@@ -43,6 +43,37 @@ void print_errno(const char* prefix, const char* message, int32_t error)
    printf("%s: %s [ %s ]\n", prefix, message, buffer);
 }
 
+bool address_equal(struct sockaddr_storage* left, struct sockaddr_storage* right)
+{
+   if (left->ss_family != right->ss_family)
+      return false;
+
+   if (left->ss_family == AF_INET)
+   {
+      struct sockaddr_in* lin = (void*)left, *rin = (void*)right;
+      if (ntohl(lin->sin_addr.s_addr) != ntohl(rin->sin_addr.s_addr))
+         return false;
+      if (ntohs(lin->sin_port) != ntohs(rin->sin_port))
+         return false;
+   } 
+   else if (left->ss_family == AF_INET6)
+   {
+      struct sockaddr_in6 *lin6 = (void*)left, *rin6 = (void*)right;
+      int r = memcmp(lin6->sin6_addr.s6_addr, rin6->sin6_addr.s6_addr, sizeof(lin6->sin6_addr.s6_addr));
+      if (r != 0)
+         return false;
+
+      if (ntohs(lin6->sin6_port) != ntohs(rin6->sin6_port))
+         return false;
+      if (lin6->sin6_flowinfo != rin6->sin6_flowinfo)
+         return false;
+      if (lin6->sin6_scope_id != rin6->sin6_scope_id)
+         return false;
+   }
+
+   return true;
+}
+
 bool address_to_string(const struct sockaddr_storage* address, char* buffer, socklen_t length)
 {
    switch (address->ss_family)
