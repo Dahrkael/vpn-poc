@@ -264,9 +264,13 @@ int main(int argc, char** argv)
          break;
       }
 
-      struct timespec delay;
-      delay.tv_nsec = 1 * 1e6; // 1ms
-      nanosleep(&delay, NULL);
+      // sleep 1ms to save cpu
+      usleep(1 * 1000);
+
+      // execution gets stuck when using nanosleep
+      //struct timespec delay;
+      //delay.tv_nsec = 1 * (1000 * 1000); // 1ms
+      //nanosleep(&delay, NULL);
    }
 
    peer_enable(local_peer, false);
