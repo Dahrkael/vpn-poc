@@ -246,15 +246,28 @@ int main(int argc, char** argv)
 
    printf("local peer ready using interface %s\n", local_peer->tunnel.if_name);
 
-   peer_connect(local_peer, &startup_options.address);
-   // TEST activate the tunnel
-   tunnel_up(&local_peer->tunnel);
+   if (local_peer->mode == VPNMode_Client)
+   {
+      printf("trying to connect to the server...\n");
+      if (!peer_connect(local_peer, &startup_options.address))
+         return -1;
+   }
+
+   // activate the tunnel (ideally this should be done *after* connection)
+   peer_enable(local_peer, true);
 
    while(true)
    {
-      peer_service(local_peer);
+      if (!peer_service(local_peer))
+      {
+         printf("error while servicing peer\n");
+         break;
+      }
       sleep(1);
    }
+
+   peer_enable(local_peer, false);
+   peer_destroy(local_peer);
 
    return 0;
 }
