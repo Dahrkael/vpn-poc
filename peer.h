@@ -10,6 +10,7 @@
 #define DEFAULT_BUFFER_SIZE 1400
 #define DEFAULT_KEEPALIVE_TIMEOUT (2 * 1000)
 #define DEFAULT_CONNECTION_TIMEOUT (10 * 1000)
+#define DEFAULT_RELIABLE_RETRY (1 * 1000)
 
 /* remote peer data */
 
@@ -30,6 +31,7 @@ struct remote_peer_t {
     struct sockaddr_storage address;
     uint32_t rtt;
     uint64_t last_recv_time;
+    uint64_t last_send_time;
 
     // encryption stuff (placeholder)
     void* cipher;

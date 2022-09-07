@@ -278,8 +278,12 @@ bool peer_service(Peer* peer)
     {
         if (peer->remote_peers && peer->remote_peers->state == PS_Handshaking)
         {
-            if (!protocol_handshake_request(peer, peer->remote_peers))
-                return false;
+            const uint64_t now = get_current_timestamp();
+            if (now - peer->remote_peers->last_send_time > DEFAULT_RELIABLE_RETRY)
+            {
+                if (!protocol_handshake_request(peer, peer->remote_peers))
+                    return false;
+            }
         }
     }
 

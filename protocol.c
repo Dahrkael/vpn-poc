@@ -134,6 +134,8 @@ bool protocol_send(Peer* peer, RemotePeer* remote, const MsgType type)
     memset(peer->send_buffer, 0, peer->buffer_size);
     peer->send_length = 0;
 
+    remote->last_send_time = get_current_timestamp();
+
     return true;
 }
 
