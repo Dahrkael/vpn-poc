@@ -238,8 +238,12 @@ void peer_check_connections(Peer* peer)
             // use pings to keep alive the connection (from clients only)
             if (elapsed > DEFAULT_KEEPALIVE_TIMEOUT)
             {
-                if (peer->mode == VPNMode_Client)
-                    protocol_ping_request(peer, remote);
+                const uint64_t last_sent = now - remote->last_send_time;
+                if (last_sent > DEFAULT_KEEPALIVE_TIMEOUT)
+                {
+                    if (peer->mode == VPNMode_Client)
+                        protocol_ping_request(peer, remote);
+                }
             }
         }
 
@@ -272,10 +276,12 @@ bool peer_service(Peer* peer)
     if (!peer)
         return false;
 
+    // manage timeouts and disconnections
     peer_check_connections(peer);
 
     if (peer->mode == VPNMode_Client)
     {
+        // handshake the server until it succeeds
         if (peer->remote_peers && peer->remote_peers->state == PS_Handshaking)
         {
             const uint64_t now = get_current_timestamp();
@@ -384,6 +390,8 @@ bool peer_service(Peer* peer)
         // blackhole the tunnel data if there are not remote peers available
         if (!peer->remote_peers)
             continue;
+
+        // TODO find the appropiate peer to send the data
 
         // don't send data if the connection is not fully established
         if (peer->remote_peers->state != PS_Connected)
