@@ -225,37 +225,45 @@ void peer_check_connections(Peer* peer)
     {
         const uint64_t elapsed = now - remote->last_recv_time;
 
-        // remove remote peers flagged for disconnection
-        if (remote->state == PS_Disconnected)
+        if (remote->state == PS_Connected)
         {
-            printf("removing disconnected peer\n");
-            RemotePeer* old = remote;
-            remote = remotepeer_destroy(remote);
-
-            if (old == peer->remote_peers)
-                peer->remote_peers = remote;
-        }
-        // remove all the remote peers that stay silent too long
-        else if (elapsed > DEFAULT_CONNECTION_TIMEOUT)
-        {
-            printf("peer timeout\n");
-            protocol_disconnect_request(peer, remote);
-            RemotePeer* old = remote;
-            remote = remotepeer_destroy(remote);
-
-            if (old == peer->remote_peers)
-                peer->remote_peers = remote;
-        }
-        else
-        {
-            // use pings to keep alive the connection (from clients only)
-            if (peer->mode == VPNMode_Client && elapsed > DEFAULT_KEEPALIVE_TIMEOUT)
+            // disconnect all the remote peers that stay silent too long
+            if (elapsed > DEFAULT_CONNECTION_TIMEOUT)
             {
-                //protocol_ping_request(peer, remote);
+                printf("disconnecting peer because of timeout\n");
+                protocol_disconnect_request(peer, remote);
+                remote->state = PS_Disconnected;
             }
 
-            remote = remote->next;
+            // use pings to keep alive the connection (from clients only)
+            if (elapsed > DEFAULT_KEEPALIVE_TIMEOUT)
+            {
+                if (peer->mode == VPNMode_Client)
+                    protocol_ping_request(peer, remote);
+            }
         }
+
+        // remove remote peers flagged for disconnection on the server
+        // try to reconnect from scratch on the client
+        if (remote->state == PS_Disconnected)
+        {
+            if (peer->mode == VPNMode_Client)
+            {
+                remote->state = PS_Handshaking;
+            }
+            else
+            {
+                printf("removing disconnected peer\n");
+                RemotePeer* old = remote;
+                remote = remotepeer_destroy(remote);
+
+                if (old == peer->remote_peers)
+                    peer->remote_peers = remote;
+
+                continue;
+            }
+        }
+        remote = remote->next;
     }
 }
 
