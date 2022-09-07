@@ -1,7 +1,6 @@
 #include "common.h"
 
 #include <getopt.h>
-#include <netinet/ip.h>
 
 // port used by the VPN
 const uint16_t SERVICE_PORT = 10980;

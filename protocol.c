@@ -1,4 +1,6 @@
 #include "peer.h"
+#include <netinet/ip.h>
+#include <netinet/ip6.h>
 
 #define PROTOCOL_ID 0xBEEFCAFE
 #define PROTOCOL_VERSION 0x1
@@ -105,6 +107,55 @@ bool protocol_decrypt(RemotePeer* remote, uint8_t* buffer, uint32_t* length)
     //if (remote->cipher)
         //remote->cipher->decrypt(remote->key, buffer, length);
     return true; 
+}
+
+bool protocol_replace_address(uint8_t* buffer, const uint32_t length, const struct sockaddr_storage* address, const bool origin)
+{
+    assert(buffer);
+    assert(address);
+
+    uint8_t address_version = 0;
+    switch(address->ss_family)
+    {
+        case AF_INET: address_version = 4; break;
+        case AF_INET6: address_version = 6; break;
+        default: return false; // discard non-IP packets
+    }
+
+    // discard the packet if its not big enough
+    if (address_version == 4 && length < sizeof(struct iphdr))
+        return false;
+    else if (address_version == 6 && length < sizeof(struct ip6_hdr))
+        return false;
+    
+    struct iphdr* header4 = (struct iphdr*)buffer;
+    struct ip6_hdr* header6 = (struct ip6_hdr*)buffer;
+
+    if (address_version != header4->version)
+    {
+        printf_debug("%s: address is IPv%u but packet is IPv%u", __func__, address_version, header4->version);
+        return false;
+    }
+
+    struct sockaddr_in* address4 = (struct sockaddr_in*)address;
+    struct sockaddr_in6* address6 = (struct sockaddr_in6*)address;
+    
+    if (origin) // outgoing -> change source
+    {
+        if (address_version == 6)
+            header6->ip6_src = address6->sin6_addr;
+        else
+            header4->saddr = address4->sin_addr.s_addr;
+    }
+    else // incoming -> change destination
+    {
+        if (address_version == 6 )
+            header6->ip6_dst = address6->sin6_addr;
+        else
+            header4->daddr = address4->sin_addr.s_addr;
+    }
+    
+    return true;
 }
 
 bool protocol_send(Peer* peer, RemotePeer* remote, const MsgType type)
@@ -358,12 +409,6 @@ bool protocol_ping(Peer* peer, RemotePeer* remote)
 
     assert(request->header.type == MT_Ping);
 
-#if DEBUG
-    char remote_text[256];
-    address_to_string(&remote->address, remote_text, sizeof(remote_text));
-    printf_debug("%s: keep-alive from %s\n", __func__, remote_text);
-#endif
-    
     // could just memcpy the request
     MsgPing* response = (MsgPing*)peer->send_buffer;
     response->send_time = request->send_time;
