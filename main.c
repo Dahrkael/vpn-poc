@@ -263,7 +263,10 @@ int main(int argc, char** argv)
          printf("error while servicing peer\n");
          break;
       }
-      sleep(1);
+
+      struct timespec delay;
+      delay.tv_nsec = 1 * 1e6; // 1ms
+      nanosleep(&delay, NULL);
    }
 
    peer_enable(local_peer, false);
