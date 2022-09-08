@@ -108,6 +108,7 @@ bool tunnel_open(Tunnel* tunnel, const char* name)
    tunnel->fd = fd;
    tunnel->socket = s;
    strncpy(tunnel->if_name, device_name, IF_NAMESIZE-1);
+   tunnel->if_name[IF_NAMESIZE-1] = '\0';
 
    return true;
 }

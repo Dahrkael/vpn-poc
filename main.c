@@ -109,7 +109,8 @@ bool parse_startup_options(int argc, char** argv, StartupOptions* result)
             break;
          }
          case 'i':
-               strncpy(result->interface, optarg, IF_NAMESIZE);
+               strncpy(result->interface, optarg, IF_NAMESIZE-1);
+               result->interface[IF_NAMESIZE-1] = '\0';
             break;
          case 'p':
                result->persistent = true;

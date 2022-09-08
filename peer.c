@@ -93,11 +93,20 @@ void peer_destroy(Peer* peer)
 
 RemotePeer* peer_find_remote(Peer* peer, struct sockaddr_storage* address, const bool real)
 {
+    //char remote_text[256];
+    //char address_text[256];
+    //address_to_string(address, address_text, sizeof(address_text));
+
     // this should be a hashmap lookup or a binary search
     RemotePeer* remote = peer->remote_peers;
     while(remote)
     {
-        if (address_equal(real ? &remote->real_address : &remote->vpn_address, address))
+        struct sockaddr_storage* relevant = real ? &remote->real_address : &remote->vpn_address;
+
+        //address_to_string(relevant, remote_text, sizeof(remote_text));
+        //printf_debug("%s: checking %s against %s\n", __func__, address_text, remote_text);
+
+        if (address_equal(relevant, address))
             return remote;
         remote = remote->next;
     }
@@ -309,6 +318,7 @@ bool peer_service(Peer* peer)
         }
     }
 
+    uint32_t processed_socket_messages = 0;
     do {
         // read messages from known and unknown peers
         RemotePeer* remote = NULL;
@@ -316,7 +326,10 @@ bool peer_service(Peer* peer)
         SocketResult ret = protocol_receive(peer, &remote, &new_remote);
 
         if (ret == SR_Error)
+        {
+            printf_debug("%s: error on protocol_receive", __func__);
             return false;
+        }
 
         if (ret == SR_Pending)
             break; // no more data to read
@@ -391,10 +404,17 @@ bool peer_service(Peer* peer)
             memset(peer->recv_buffer, 0, peer->buffer_size);
             peer->recv_length = 0;
 
-            if (!ok) return false;
+            if (!ok)
+            {
+                printf_debug("%s: error handling a message", __func__);
+                return false;
+            }
         }
-    } while(true);
 
+        processed_socket_messages++;
+    } while(processed_socket_messages < 100);
+
+    uint32_t processed_tunnel_messages = 0;
     do {
         // read outgoing data from the tunnel
         uint32_t read = protocol_max_payload(peer);
@@ -421,7 +441,9 @@ bool peer_service(Peer* peer)
             remote = peer_find_remote(peer, &destination, false );
             if (!remote)
             {
-                printf_debug("%s: packet targeted to a non-existant peer\n", __func__);
+                char dst_text[256];
+                address_to_string(&destination, dst_text, sizeof(dst_text));
+                printf_debug("%s: packet targeted to a non-existant peer (%s)\n", __func__, dst_text);
                 continue;
             }
         }
@@ -437,8 +459,12 @@ bool peer_service(Peer* peer)
         // send tunnel data through the socket
         peer->send_length = read + sizeof(MsgHeader);
         if (!protocol_data_send(peer, remote))
-            return false;    
-    } while(true);
+        {
+            printf_debug("%s: error on protocol_data_send", __func__);
+            return false;
+        }
+        processed_tunnel_messages++;
+    } while(processed_tunnel_messages < 100);
     
     return true;
 }

@@ -296,9 +296,13 @@ bool protocol_send(Peer* peer, RemotePeer* remote, const MsgType type)
     ok = protocol_encrypt(remote, peer->send_buffer, &peer->send_length);
     assert(ok); // encrypt cannot fail
 
+    SocketResult ret = SR_Pending;
     uint32_t sent = peer->send_length;
-    if (!socket_send(&peer->socket, peer->send_buffer, &sent, &remote->real_address))
-        return false;
+    do {
+        ret = socket_send(&peer->socket, peer->send_buffer, &sent, &remote->real_address);
+        if (ret == SR_Error)
+            return false;
+    }while(ret == SR_Pending);
 
     assert(sent == peer->send_length); // TODO manage this
 
@@ -465,10 +469,12 @@ bool protocol_handshake_client(Peer* peer, struct sockaddr_storage* remote)
     //new_peer->key = ;
 
     // create a fake vpn address based on the id (TODO ipV4 only)
+    assert(remote->ss_family == AF_INET);
     new_peer->vpn_address = peer->tunnel_address_block;
     struct sockaddr_in* ipv4 = (struct sockaddr_in*)&new_peer->vpn_address;
     uint8_t* last_octet = ((uint8_t*)&ipv4->sin_addr.s_addr) + 3;
     *last_octet = new_peer->id;
+    ipv4->sin_port = ((struct sockaddr_in*)&new_peer->real_address)->sin_port;
 
     // place it at the end of the list
     if (!peer->remote_peers)
@@ -509,7 +515,7 @@ bool protocol_handshake_server(Peer* peer, RemotePeer* remote)
     if (message->version != PROTOCOL_VERSION)
         return false;
 
-    printf_debug("%s: handshake successful\n", __func__);
+    printf("%s: handshake successful\n", __func__);
 
     // now it can start forwawrding packets
     remote->state = PS_Connected;

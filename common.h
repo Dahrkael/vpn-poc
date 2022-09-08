@@ -28,6 +28,7 @@ typedef enum {
 
 void printf_debug(const char* format, ...) 
 {
+   (void)format;
 #if DEBUG
    printf("[debug] ");
     va_list args;
@@ -75,15 +76,24 @@ bool address_is_localhost(const struct sockaddr_storage* address)
 bool address_equal(struct sockaddr_storage* left, struct sockaddr_storage* right)
 {
    if (left->ss_family != right->ss_family)
+   {
+      //printf_debug("%s: different family", __func__);
       return false;
+   }
 
    if (left->ss_family == AF_INET)
    {
       struct sockaddr_in* lin = (void*)left, *rin = (void*)right;
       if (ntohl(lin->sin_addr.s_addr) != ntohl(rin->sin_addr.s_addr))
+      {
+         //printf_debug("%s: different address", __func__);
          return false;
+      }
       if (ntohs(lin->sin_port) != ntohs(rin->sin_port))
+      {
+         //printf_debug("%s: different port", __func__);
          return false;
+      }
    } 
    else if (left->ss_family == AF_INET6)
    {
