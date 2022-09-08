@@ -244,11 +244,14 @@ void peer_check_connections(Peer* peer)
             // use pings to keep alive the connection (from clients only)
             if (elapsed > DEFAULT_KEEPALIVE_TIMEOUT)
             {
-                const uint64_t last_sent = now - remote->last_send_time;
+                const uint64_t last_sent = now - remote->last_ping_time;
+                // disabled because requests without answer will trigger the timeout
                 if (last_sent > DEFAULT_KEEPALIVE_TIMEOUT)
                 {
                     if (peer->mode == VPNMode_Client)
                         protocol_ping_request(peer, remote);
+                        
+                    remote->last_ping_time = now;
                 }
             }
         }

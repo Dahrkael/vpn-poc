@@ -32,6 +32,7 @@ struct remote_peer_t {
     uint32_t rtt;
     uint64_t last_recv_time;
     uint64_t last_send_time;
+    uint64_t last_ping_time;
 
     // encryption stuff (placeholder)
     void* cipher;
