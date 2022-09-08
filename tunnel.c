@@ -183,6 +183,30 @@ bool tunnel_set_name(Tunnel* tunnel, const char* name)
    return ioctl(tunnel->fd, TUNSETIFF, (void*)&request) == 0;
 }
 
+bool tunnel_get_local_address(Tunnel* tunnel, struct sockaddr_storage* address)
+{
+   if (!tunnel_is_valid(tunnel))
+      return false;
+      
+   if (tunnel->socket == -1)
+      return false;
+
+   struct ifreq request;
+   CLEAR(request);
+   memcpy(&request.ifr_name, tunnel->if_name, IF_NAMESIZE);
+   
+   if (ioctl(tunnel->socket, SIOCGIFADDR, (void*)&request) < 0)
+   {
+      printf_debug("%s: error getting local address\n", __func__ );
+      return false;
+   }
+
+   // copy the returned address to the output parameter
+   memcpy(address, &request.ifr_addr, sizeof(request.ifr_addr));
+
+   return true;
+}
+
 bool tunnel_set_local_address(Tunnel* tunnel, const struct sockaddr_storage* address)
 {
    if (!tunnel_is_valid(tunnel))
@@ -201,6 +225,30 @@ bool tunnel_set_local_address(Tunnel* tunnel, const struct sockaddr_storage* add
       printf_debug("%s: error setting local address\n", __func__ );
       return false;
    }
+   return true;
+}
+
+bool tunnel_get_remote_address(Tunnel* tunnel, struct sockaddr_storage* address)
+{
+   if (!tunnel_is_valid(tunnel))
+      return false;
+      
+   if (tunnel->socket == -1)
+      return false;
+
+   struct ifreq request;
+   CLEAR(request);
+   memcpy(&request.ifr_name, tunnel->if_name, IF_NAMESIZE);
+   
+   if (ioctl(tunnel->socket, SIOCGIFDSTADDR, (void*)&request) < 0)
+   {
+      printf_debug("%s: error getting remote address\n", __func__ );
+      return false;
+   }
+
+   // copy the returned address to the output parameter
+   memcpy(address, &request.ifr_addr, sizeof(request.ifr_addr));
+
    return true;
 }
 

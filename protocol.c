@@ -133,7 +133,7 @@ bool protocol_replace_address(uint8_t* buffer, const uint32_t length, const stru
 
     if (address_version != header4->version)
     {
-        printf_debug("%s: address is IPv%u but packet is IPv%u", __func__, address_version, header4->version);
+        printf_debug("%s: address is IPv%u but packet is IPv%u\n", __func__, address_version, header4->version);
         return false;
     }
 
@@ -451,18 +451,32 @@ bool protocol_data_send(Peer* peer, RemotePeer* remote)
     if (peer->send_length == 0)
         return true;
 
-    // TODO server NAT
-
     return protocol_send(peer, remote, MT_Data);
 }
 
 bool protocol_data_receive(Peer* peer, RemotePeer* remote)
 {
     // skip the header at the beginning of the buffer
-    const uint8_t* data = peer->recv_buffer + sizeof(MsgHeader);
+    uint8_t* data = peer->recv_buffer + sizeof(MsgHeader);
     const uint32_t data_length = peer->recv_length - sizeof(MsgHeader);
 
-    // TODO server NAT
+    // NAT
+    if (peer->mode == VPNMode_Server)
+    {
+        // replace the tunnel remote address with the real peer address
+        // so it can figure out where to send the responses later.
+        // if its localhost use the tunnel address assuming theres only one client
+        const bool is_localhost = address_is_localhost(&remote->address);
+        struct sockaddr_storage* source = is_localhost ? &peer->tunnel_remote_address : &remote->address;
+        
+        if (!protocol_replace_address(data, data_length, source, true))
+            return false;
+    }
+    else
+    {
+        if (!protocol_replace_address(data, data_length, &peer->tunnel_local_address, false))
+            return false;
+    }
 
     if (!tunnel_write(&peer->tunnel, data, data_length))
         return false;

@@ -54,6 +54,24 @@ uint64_t get_current_timestamp()
    return spec.tv_sec * 1000 + spec.tv_nsec / 1e6;
 }
 
+bool address_is_localhost(const struct sockaddr_storage* address)
+{
+   if (address->ss_family == AF_INET)
+   {
+      struct sockaddr_in localhost;
+      localhost.sin_addr.s_addr = htonl(ntohl(0x0100007F));
+
+      struct sockaddr_in* address4 = (struct sockaddr_in*)address;
+
+      const uint32_t a = ntohl(localhost.sin_addr.s_addr);
+      const uint32_t b = ntohl(address4->sin_addr.s_addr);
+      
+      if (a == b)
+         return true;
+   } 
+   return false;
+}
+
 bool address_equal(struct sockaddr_storage* left, struct sockaddr_storage* right)
 {
    if (left->ss_family != right->ss_family)

@@ -171,6 +171,12 @@ bool peer_initialize(Peer* peer, const StartupOptions* options)
     if (!tunnel_set_network_mask(&peer->tunnel, &netmask))
         return false;
 
+    // cache the tunnel addresses for the inner NAT
+    if (!tunnel_get_local_address(&peer->tunnel, &peer->tunnel_local_address))
+        return false;
+    if (!tunnel_get_remote_address(&peer->tunnel, &peer->tunnel_remote_address))
+        return false;
+
     return true;
 }
 
@@ -398,7 +404,7 @@ bool peer_service(Peer* peer)
             continue;
 
         // send tunnel data through the socket
-        peer->send_length = read;
+        peer->send_length = read + sizeof(MsgHeader);
         if (!protocol_data_send(peer, peer->remote_peers))
             return false;    
     } while(true);

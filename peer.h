@@ -55,6 +55,9 @@ typedef struct {
     uint8_t* send_buffer;
     uint32_t send_length;
     RemotePeer* remote_peers;
+
+    struct sockaddr_storage tunnel_local_address; // cache
+    struct sockaddr_storage tunnel_remote_address; // cache
 } Peer;
 
 RemotePeer* remotepeer_create();
