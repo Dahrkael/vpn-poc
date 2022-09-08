@@ -1,6 +1,8 @@
 #include "peer.h"
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
 
 #define PROTOCOL_ID 0xBEEFCAFE
 #define PROTOCOL_VERSION 0x1
@@ -75,6 +77,95 @@ uint32_t protocol_compute_checksum(const uint8_t* buffer, const uint32_t length)
         b = (b + a) % modulo;
     }
     return (b << 16) | a;
+}
+
+void protocol_compute_ip_checksum(struct iphdr* ip_header)
+{
+    ip_header->check = 0;
+
+    uint16_t* addr = (uint16_t*)ip_header;
+    uint32_t count = ip_header->ihl << 2;
+    register uint64_t sum = 0;
+    while (count > 1) 
+    {
+        sum += *addr++;
+        count -= 2;
+    }
+    
+    // padding
+    if (count > 0)
+        sum += ((*addr) & htons(0xFF00));
+    
+    // folding
+    while (sum >> 16)
+        sum = (sum & 0xffff) + (sum >> 16);
+    
+    sum = ~sum;
+    ip_header->check = (uint16_t)sum;
+}
+
+void protocol_compute_tcp_checksum(struct iphdr* ip_header, uint16_t* payload)
+{
+    register uint64_t sum = 0;
+    uint16_t tcp_length = ntohs(ip_header->tot_len) - (ip_header->ihl << 2);
+    struct tcphdr* tcp_header = (struct tcphdr*)payload;
+    
+    // tcp pseudoheader
+    // source ip
+    sum += (ip_header->saddr >> 16) & 0xFFFF;
+    sum += (ip_header->saddr) & 0xFFFF;
+    //destination ip
+    sum += (ip_header->daddr >> 16) & 0xFFFF;
+    sum += (ip_header->daddr) & 0xFFFF;
+    // protocol and reserved: 6
+    sum += htons(IPPROTO_TCP);
+    // length
+    sum += htons(tcp_length);
+ 
+    tcp_header->check = 0;
+    while (tcp_length > 1) 
+    {
+        sum += * payload++;
+        tcp_length -= 2;
+    }
+
+    // padding
+    if (tcp_length > 0) 
+        sum += ((*payload) & htons(0xFF00));
+
+    // folding
+    while (sum>>16)
+        sum = (sum & 0xffff) + (sum >> 16);
+
+    sum = ~sum;
+    tcp_header->check = (uint16_t)sum;
+}
+
+void protocol_compute_udp_checksum(struct iphdr* ip_header, uint16_t* payload)
+{
+    (void)ip_header;
+    struct udphdr *udp_header = (struct udphdr*)payload;
+    udp_header->check = 0; // udp checksum is optional
+}
+void protocol_recompute_packet_checksums(const uint8_t* buffer, const uint32_t length)
+{
+    (void)length;
+    struct iphdr* header = (struct iphdr*)buffer;
+    // recompute the ip header
+    protocol_compute_ip_checksum(header);
+    
+    uint16_t* payload = (uint16_t*)(buffer + sizeof(header));
+    switch(header->protocol)
+    {
+    case IPPROTO_TCP:
+        protocol_compute_tcp_checksum(header, payload);
+        break;
+    case IPPROTO_UDP:
+        protocol_compute_udp_checksum(header, payload);
+        break;
+    default:
+        break;
+    }
 }
 
 // placeholder
@@ -461,6 +552,7 @@ bool protocol_data_receive(Peer* peer, RemotePeer* remote)
     const uint32_t data_length = peer->recv_length - sizeof(MsgHeader);
 
     // NAT
+    bool header_modified = false;
     if (peer->mode == VPNMode_Server)
     {
         // replace the tunnel remote address with the real peer address
@@ -471,12 +563,20 @@ bool protocol_data_receive(Peer* peer, RemotePeer* remote)
         
         if (!protocol_replace_address(data, data_length, source, true))
             return false;
+
+        header_modified = true;
     }
     else
     {
         if (!protocol_replace_address(data, data_length, &peer->tunnel_local_address, false))
-            return false;
+           return false;
+           
+        header_modified = true;
     }
+
+    // all checksums need to be recomputed after messing with the packet
+    if (header_modified)
+        protocol_recompute_packet_checksums(data, data_length);
 
     if (!tunnel_write(&peer->tunnel, data, data_length))
         return false;
