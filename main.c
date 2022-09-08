@@ -10,7 +10,7 @@ void show_help(const char* executable)
    if (!executable)
       executable = "executable";
 
-   printf("\nUsage: %s {-s [<bind address>] | -c <remote address>} [-a <tunnel address>] [-m <tunnel netmask>] [-i <tunnel interface>] [-p] [-h]\n", executable);
+   printf("\nUsage: %s {-s [<bind address>] | -c <remote address>} [-a <tunnel address>] [-m <tunnel netmask>] [-l <mtu>] [-i <tunnel interface>] [-p] [-h]\n", executable);
    printf("\t-s, --server\tstart the vpn in server mode. optionally specify the address to bind to (defaults to 0.0.0.0)\n");
    printf("\t-c, --connect\tstart the vpn in client mode. specify the remote server address to connect to.\n");
    printf("\t-a, --address\tspecify the address block used for the tun device. (defaults to 10.9.8.0)\n");
