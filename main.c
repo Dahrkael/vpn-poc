@@ -15,6 +15,7 @@ void show_help(const char* executable)
    printf("\t-c, --connect\tstart the vpn in client mode. specify the remote server address to connect to.\n");
    printf("\t-a, --address\tspecify the address block used for the tun device. (defaults to 10.9.8.0)\n");
    printf("\t-m, --mask\tspecify the network mask used for the tun device. (defaults to 255.255.255.0)\n");
+   printf("\t-l, --mtu\tspecify the MTU for the tun device. (defaults to 1400)\n");
    printf("\t-i, --interface\ttun device name to create or attach if it already exists. (max 15 characters)\n");
    printf("\t-p, --persist\tkeep the tun device after shutting down the vpn.\n");
 }

@@ -46,7 +46,10 @@ int32_t allocate_tun_device(char* device_name)
 
    // set custom name if specified
    if( *device_name )
-      strncpy(request.ifr_name, device_name, IF_NAMESIZE);
+   {
+      strncpy(request.ifr_name, device_name, IF_NAMESIZE-1);
+      request.ifr_name[IF_NAMESIZE-1] = '\0';
+   }
 
    printf_debug("%s: requesting interface %s\n", __func__, request.ifr_name);
    if ( ioctl(tun_fd, TUNSETIFF, (void*)&request) < 0 )
@@ -176,7 +179,8 @@ bool tunnel_set_name(Tunnel* tunnel, const char* name)
 
    struct ifreq request;
    CLEAR(request);
-   strncpy(request.ifr_name, name, IF_NAMESIZE);
+   strncpy(request.ifr_name, name, IF_NAMESIZE-1);
+   request.ifr_name[IF_NAMESIZE-1] = '\0';
 
    if (!tunnel_get_flags(tunnel, false, &request.ifr_flags))
       return false;
