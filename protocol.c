@@ -154,7 +154,7 @@ void protocol_recompute_packet_checksums(const uint8_t* buffer, const uint32_t l
     // recompute the ip header
     protocol_compute_ip_checksum(header);
     
-    uint16_t* payload = (uint16_t*)(buffer + sizeof(header));
+    uint16_t* payload = (uint16_t*)(buffer + (header->ihl << 2));
     switch(header->protocol)
     {
     case IPPROTO_TCP:
@@ -245,6 +245,8 @@ bool protocol_replace_address(uint8_t* buffer, const uint32_t length, const stru
         else
             header4->daddr = address4->sin_addr.s_addr;
     }
+
+    protocol_recompute_packet_checksums(buffer, length);
     
     return true;
 }
@@ -552,7 +554,6 @@ bool protocol_data_receive(Peer* peer, RemotePeer* remote)
     const uint32_t data_length = peer->recv_length - sizeof(MsgHeader);
 
     // NAT
-    bool header_modified = false;
     if (peer->mode == VPNMode_Server)
     {
         // replace the tunnel remote address with the real peer address
@@ -563,20 +564,13 @@ bool protocol_data_receive(Peer* peer, RemotePeer* remote)
         
         if (!protocol_replace_address(data, data_length, source, true))
             return false;
-
-        header_modified = true;
     }
     else
     {
         if (!protocol_replace_address(data, data_length, &peer->tunnel_local_address, false))
            return false;
-           
-        header_modified = true;
     }
-
-    // all checksums need to be recomputed after messing with the packet
-    if (header_modified)
-        protocol_recompute_packet_checksums(data, data_length);
+        
 
     if (!tunnel_write(&peer->tunnel, data, data_length))
         return false;
