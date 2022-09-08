@@ -79,6 +79,34 @@ uint32_t protocol_compute_checksum(const uint8_t* buffer, const uint32_t length)
     return (b << 16) | a;
 }
 
+bool protocol_get_destination(const uint8_t* buffer, const uint32_t length, struct sockaddr_storage* destination)
+{
+    struct iphdr* header4 = (struct iphdr*)buffer;
+    if (length < sizeof(struct iphdr) && length < (uint32_t)(header4->ihl << 2))
+        return false;
+
+    if (header4->version == 6)
+    {
+        struct ip6_hdr* header6 = (struct ip6_hdr*)buffer;
+        struct sockaddr_in6* ipv6 = (struct sockaddr_in6*)destination;
+        ipv6->sin6_addr = header6->ip6_dst;
+        destination->ss_family = AF_INET6;
+    }
+    else if (header4->version == 4)
+    {
+        struct sockaddr_in* ipv4 = (struct sockaddr_in*)destination;
+        ipv4->sin_addr.s_addr = header4->daddr;
+        destination->ss_family = AF_INET;
+    }
+    else
+    {
+        assert("invalid ip version");
+        return false;
+    }
+
+    return true;
+}
+
 void protocol_compute_ip_checksum(struct iphdr* ip_header)
 {
     ip_header->check = 0;
@@ -269,7 +297,7 @@ bool protocol_send(Peer* peer, RemotePeer* remote, const MsgType type)
     assert(ok); // encrypt cannot fail
 
     uint32_t sent = peer->send_length;
-    if (!socket_send(&peer->socket, peer->send_buffer, &sent, &remote->address))
+    if (!socket_send(&peer->socket, peer->send_buffer, &sent, &remote->real_address))
         return false;
 
     assert(sent == peer->send_length); // TODO manage this
@@ -294,7 +322,7 @@ SocketResult protocol_receive(Peer* peer, RemotePeer** remote, struct sockaddr_s
     if (ret == SR_Success)
     {
         // if not found will be NULL
-        *remote = peer_find_remote(peer, &address);
+        *remote = peer_find_remote(peer, &address, true);
         *new_remote = address;
 
         // first decrypt
@@ -351,7 +379,7 @@ bool protocol_reconnect_client(Peer* peer, struct sockaddr_storage* remote)
     {
         if ((remote_peer->id == message->id) && (remote_peer->secret == message->secret))
         {
-            remote_peer->address = *remote;
+            remote_peer->real_address = *remote;
             remote_peer->secret = rand();
             found = true;
             break;
@@ -406,7 +434,7 @@ bool protocol_handshake_client(Peer* peer, struct sockaddr_storage* remote)
 {
     char remote_text[256];
     address_to_string(remote, remote_text, sizeof(remote_text));
-    printf_debug("%s: new connection from %s\n", __func__, remote_text);
+    printf("%s: new connection from %s\n", __func__, remote_text);
 
     MsgHandshake* message = (MsgHandshake*)peer->recv_buffer;
 
@@ -416,18 +444,31 @@ bool protocol_handshake_client(Peer* peer, struct sockaddr_storage* remote)
     if (message->version != PROTOCOL_VERSION)
         return true;
 
+    // TODO temporal failsafe
+    if (peer->next_id >= peer->total_ids)
+    {
+        printf("%s: client IDs exhausted! restart the server to accept more\n", __func__);
+        return true;
+    }
+
      // create a remote peer representing the new client
     RemotePeer* new_peer = remotepeer_create();
     assert(new_peer);
 
-    new_peer->id = /*TODO*/99;
+    new_peer->id = peer->next_id++;
     new_peer->secret = rand();
 
     new_peer->state = PS_Connected;
-    new_peer->address = *remote;
+    new_peer->real_address = *remote;
     new_peer->last_recv_time = get_current_timestamp();
     //new_peer->cipher = ;
     //new_peer->key = ;
+
+    // create a fake vpn address based on the id (TODO ipV4 only)
+    new_peer->vpn_address = peer->tunnel_address_block;
+    struct sockaddr_in* ipv4 = (struct sockaddr_in*)&new_peer->vpn_address;
+    uint8_t* last_octet = ((uint8_t*)&ipv4->sin_addr.s_addr) + 3;
+    *last_octet = new_peer->id;
 
     // place it at the end of the list
     if (!peer->remote_peers)
@@ -442,7 +483,9 @@ bool protocol_handshake_client(Peer* peer, struct sockaddr_storage* remote)
         last->next = new_peer;
     }
 
-    printf_debug("%s: peer accepted from %s\n", __func__, remote_text);
+    char vpn_text[256];
+    address_to_string(&new_peer->vpn_address, vpn_text, sizeof(vpn_text));
+    printf("%s: peer %u (%s) accepted from %s\n", __func__, new_peer->id, vpn_text, remote_text);
 
     // send handshake answer
     if (!protocol_handshake_request(peer, new_peer))
@@ -477,7 +520,7 @@ bool protocol_ping_request(Peer* peer, RemotePeer* remote)
 {
 #if DEBUG
     char remote_text[256];
-    address_to_string(&remote->address, remote_text, sizeof(remote_text));
+    address_to_string(&remote->real_address, remote_text, sizeof(remote_text));
     printf_debug("%s: keep-alive to %s after %lums\n", __func__, remote_text, 
         get_current_timestamp() - remote->last_recv_time);
 #endif
@@ -530,7 +573,7 @@ bool protocol_disconnect(Peer* peer, RemotePeer* remote)
     MsgDisconnect* message = (MsgDisconnect*)peer->recv_buffer;
 
     char remote_text[256];
-    address_to_string(&remote->address, remote_text, sizeof(remote_text));
+    address_to_string(&remote->real_address, remote_text, sizeof(remote_text));
     printf("disconnection (reason %u) from %s\n", message->reason, remote_text);
 
     // mark as disconnected and remove it in peer_check_connections()
@@ -556,12 +599,9 @@ bool protocol_data_receive(Peer* peer, RemotePeer* remote)
     // NAT
     if (peer->mode == VPNMode_Server)
     {
-        // replace the tunnel remote address with the real peer address
-        // so it can figure out where to send the responses later.
-        // if its localhost use the tunnel address assuming theres only one client
-        const bool is_localhost = address_is_localhost(&remote->address);
-        struct sockaddr_storage* source = is_localhost ? &peer->tunnel_remote_address : &remote->address;
-        
+        // replace the tunnel remote address with the fake vpn address
+        // so it can figure out where to send the responses later
+        struct sockaddr_storage* source = &remote->vpn_address;
         if (!protocol_replace_address(data, data_length, source, true))
             return false;
     }

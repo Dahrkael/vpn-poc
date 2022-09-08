@@ -28,7 +28,8 @@ struct remote_peer_t {
     uint8_t id;
     PeerState state;
     uint64_t secret; // for reconnection
-    struct sockaddr_storage address;
+    struct sockaddr_storage real_address;
+    struct sockaddr_storage vpn_address;
     uint32_t rtt;
     uint64_t last_recv_time;
     uint64_t last_send_time;
@@ -57,12 +58,16 @@ typedef struct {
     uint32_t send_length;
     RemotePeer* remote_peers;
 
+    uint32_t next_id; // for remote peers
+    uint32_t total_ids;
+
+    struct sockaddr_storage tunnel_address_block; // cache
     struct sockaddr_storage tunnel_local_address; // cache
     struct sockaddr_storage tunnel_remote_address; // cache
 } Peer;
 
 RemotePeer* remotepeer_create();
-RemotePeer* peer_find_remote(Peer* peer, struct sockaddr_storage* address);
+RemotePeer* peer_find_remote(Peer* peer, struct sockaddr_storage* address, const bool real);
 
 /* protocol data */
 

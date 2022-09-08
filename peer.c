@@ -18,7 +18,7 @@ RemotePeer* remotepeer_destroy(RemotePeer* peer)
 
 #if DEBUG
     char text[256];
-    address_to_string(&peer->address, text, sizeof(text));
+    address_to_string(&peer->real_address, text, sizeof(text));
     printf_debug("%s: peer address %s\n", __func__, text);
 #endif
 
@@ -91,13 +91,13 @@ void peer_destroy(Peer* peer)
     free(peer);
 }
 
-RemotePeer* peer_find_remote(Peer* peer, struct sockaddr_storage* address)
+RemotePeer* peer_find_remote(Peer* peer, struct sockaddr_storage* address, const bool real)
 {
     // this should be a hashmap lookup or a binary search
     RemotePeer* remote = peer->remote_peers;
     while(remote)
     {
-        if (address_equal(&remote->address, address))
+        if (address_equal(real ? &remote->real_address : &remote->vpn_address, address))
             return remote;
         remote = remote->next;
     }
@@ -154,7 +154,7 @@ bool peer_initialize(Peer* peer, const StartupOptions* options)
         address.ss_family = AF_INET;
         ((struct sockaddr_in*)&address)->sin_addr.s_addr = inet_addr(default_tunnel_address);
     }
-
+    
     if (!tunnel_set_addresses(&peer->tunnel, &address))
         return false;
 
@@ -171,11 +171,18 @@ bool peer_initialize(Peer* peer, const StartupOptions* options)
     if (!tunnel_set_network_mask(&peer->tunnel, &netmask))
         return false;
 
+    // cache the address block
+    peer->tunnel_address_block = address;
+
     // cache the tunnel addresses for the inner NAT
     if (!tunnel_get_local_address(&peer->tunnel, &peer->tunnel_local_address))
         return false;
     if (!tunnel_get_remote_address(&peer->tunnel, &peer->tunnel_remote_address))
         return false;
+
+    // TODO these should be derived from the block and mask assigned before
+    peer->next_id = 3;
+    peer->total_ids = 252;
 
     return true;
 }
@@ -206,7 +213,7 @@ bool peer_connect(Peer* peer, const struct sockaddr_storage* address)
     assert(remote_peer);
 
     remote_peer->state = PS_Handshaking;
-    remote_peer->address = *address;
+    remote_peer->real_address = *address;
     remote_peer->last_recv_time = get_current_timestamp();
     assert(remote_peer->last_recv_time != 0);
 
@@ -250,7 +257,7 @@ void peer_check_connections(Peer* peer)
                 {
                     if (peer->mode == VPNMode_Client)
                         protocol_ping_request(peer, remote);
-                        
+
                     remote->last_ping_time = now;
                 }
             }
@@ -347,7 +354,7 @@ bool peer_service(Peer* peer)
             {
 #if DEBUG
             char remote_text[256];
-            address_to_string(&remote->address, remote_text, sizeof(remote_text));
+            address_to_string(&remote->real_address, remote_text, sizeof(remote_text));
             printf_debug("[%s] %s: received message [%s] from %s\n", 
                 peer->mode == VPNMode_Server ? "server" : "client", 
                 __func__, protocol_get_type_text(type), remote_text );
@@ -400,15 +407,36 @@ bool peer_service(Peer* peer)
         if (!peer->remote_peers)
             continue;
 
-        // TODO find the appropiate peer to send the data
+        RemotePeer* remote = NULL;
+        if (peer->mode == VPNMode_Server)
+        {
+            // find the appropiate peer to send the data
+            struct sockaddr_storage destination;
+            if (!protocol_get_destination(buffer, read, &destination))
+            {
+                printf_debug("%s: failed to read packet destination\n", __func__);
+                continue;
+            }
+
+            remote = peer_find_remote(peer, &destination, false );
+            if (!remote)
+            {
+                printf_debug("%s: packet targeted to a non-existant peer\n", __func__);
+                continue;
+            }
+        }
+        else
+        {
+            remote = peer->remote_peers; // the server
+        }
 
         // don't send data if the connection is not fully established
-        if (peer->remote_peers->state != PS_Connected)
+        if (remote->state != PS_Connected)
             continue;
 
         // send tunnel data through the socket
         peer->send_length = read + sizeof(MsgHeader);
-        if (!protocol_data_send(peer, peer->remote_peers))
+        if (!protocol_data_send(peer, remote))
             return false;    
     } while(true);
     
