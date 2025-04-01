@@ -167,8 +167,8 @@ int debug_main(const StartupOptions* startup_options)
    options_client.mode = VPNMode_Client;
 
    // hardcode the interfaces to something meaningful
-   strncpy(options_server.interface, "ddgs", IF_NAMESIZE-1);
-   strncpy(options_client.interface, "ddgc", IF_NAMESIZE-1);
+   strncpy(options_server.interface, "vpns", IF_NAMESIZE-1);
+   strncpy(options_client.interface, "vpnc", IF_NAMESIZE-1);
 
    // use different blocks to avoid conflicts (default network mask)
    parse_network_address("10.9.7.0", &options_server.tunnel_address);

@@ -125,8 +125,8 @@ bool peer_initialize2(Peer* peer, const VPNMode mode, const struct sockaddr_stor
     if (!socket_open(&peer->socket, address->ss_family == AF_INET6, true))
         return false;
 
-    // mark sent packets as 'DDG' for later use in routing
-    if (!socket_set_mark(&peer->socket, 0x00000DD6))
+    // mark sent packets as 'SEC__POC' for later use in routing
+    if (!socket_set_mark(&peer->socket, 0x5EC0070C))
         return false;
 
     // create the requested tunnel
